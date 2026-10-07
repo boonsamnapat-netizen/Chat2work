@@ -78,6 +78,12 @@
 - **Sale decisions, all six sets:** 0 false sales in 135 non-sale conversations and full sale recall. The review and abstention rates per set are in the README. With IID sampling the one-sided bound would be about 2.2%, but the sets are hand-written and mostly tuned, so **this is not real-world evidence**.
 - **Usefulness:** human usefulness is **not measured**.
 
+### CI note
+
+The first push of v0.1.3 (`911ae43`) **failed CI** on all three Python versions. Tests and the gated benchmark passed; the workflow's summary-print step failed with `KeyError: 'metrics'`. That step assumed every report has label metrics, and the new action-scenario report does not.
+
+The step was fixed to print both report types. Every workflow step was then run verbatim from a clean copy before the fix was pushed. Lesson: run the workflow's own commands locally, not just pytest and `evaluate.py`.
+
 ### Remaining weaknesses
 
 - **Small heuristic event layer.**
