@@ -1,5 +1,5 @@
 {
-  "note": "First runs on each holdout, recorded before any rule change informed by that holdout. After these runs both holdouts were used for error analysis, so later scores on them are NOT blind. Synthetic data only.",
+  "note": "First runs on each holdout, recorded before any rule change informed by that holdout. After these runs every holdout was used for error analysis, so later scores on them are NOT blind. Synthetic data only.",
   "holdout.jsonl": {
     "engine": "unmodified v0.1 candidate from Chat2work-v0.1.zip",
     "amount_scoring": "values only (role metric not yet implemented)",
@@ -153,6 +153,80 @@
       "h2_print_rush",
       "h2_agency_retainer_accept",
       "h2_agency_smalltalk"
+    ]
+  },
+  "holdout3.jsonl": {
+    "engine": "v0.1.1 after the five review fixes, before any holdout3-informed change",
+    "amount_scoring": "values and roles",
+    "labels_frozen_sha256": "f5b0fcf7ad6d3aa1efdb613d554aa8a47110f6b6e4b3162d18a48f0702aff99a",
+    "cases": 20,
+    "metrics": {
+      "commitments": {
+        "tp": 6,
+        "fp": 1,
+        "fn": 1,
+        "precision": 0.8571428571428571,
+        "recall": 0.8571428571428571,
+        "f1": 0.8571428571428571
+      },
+      "amounts": {
+        "tp": 20,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "amount_roles": {
+        "tp": 20,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "dates": {
+        "tp": 12,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "commercial_intent": {
+        "tp": 20,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "decision_pending": {
+        "tp": 2,
+        "fp": 1,
+        "fn": 0,
+        "precision": 0.6666666666666666,
+        "recall": 1.0,
+        "f1": 0.8
+      },
+      "confirmed_sale": {
+        "tp": 4,
+        "fp": 0,
+        "fn": 3,
+        "precision": 1.0,
+        "recall": 0.5714285714285714,
+        "f1": 0.7272727272727273
+      }
+    },
+    "false_confirmed_sales": 0,
+    "negative_sale_cases": 13,
+    "opportunity_amount_accuracy": 1.0,
+    "failed_case_ids": [
+      "h3_elec_reschedule_time_unknown",
+      "h3_elec_paid_and_visit",
+      "h3_repair_accept_named",
+      "h3_print_accept_after_question",
+      "h3_solar_survey_completed"
     ]
   }
 }

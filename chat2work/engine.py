@@ -54,6 +54,41 @@ def _resolve_dates(signals: list[Signal], reference: date | None) -> list[Signal
     return out
 
 
+APPOINTMENT_COMMITMENTS = {"reserve_or_attend_appointment", "attend_appointment"}
+PAYMENT_COMMITMENTS = {"make_payment", "pay_deposit"}
+
+
+def _live(s: Signal) -> bool:
+    return s.metadata.get("slot_status") != "superseded"
+
+
+def _mark_superseded_slots(signals: list[Signal]) -> list[Signal]:
+    """After a reschedule, earlier appointment slots, their times and attendance promises
+    remain as history but are marked superseded; only the latest arrangement is active."""
+    reschedules = [s for s in signals if s.type == "reschedule_request"]
+    if not reschedules:
+        return signals
+    latest = reschedules[-1]
+    cutoff = latest.evidence.message_id
+    appointment_messages = {s.evidence.message_id for s in signals
+                            if s.type == "appointment" or (s.type.endswith("_commitment") and s.value in APPOINTMENT_COMMITMENTS)}
+    out = []
+    for s in signals:
+        earlier = s.evidence.message_id < cutoff
+        stale = (s.metadata.get("slot_status") == "superseded"
+                 or (earlier and (s.type in {"appointment", "reschedule_request"}
+                                  or (s.type.endswith("_commitment") and s.value in APPOINTMENT_COMMITMENTS)
+                                  or (s.type in {"schedule", "deadline"} and s.evidence.message_id in appointment_messages))))
+        if stale:
+            s = replace(s, metadata={**s.metadata, "slot_status": "superseded", "superseded_by": latest.id})
+        out.append(s)
+    return out
+
+
+def _after(signal: Signal, events: list[Signal]) -> bool:
+    return any(e.evidence.message_id > signal.evidence.message_id for e in events)
+
+
 def analyze(conversation: str, *, extractor: Extractor | None = None, reference_date: date | None = None,
             customer_speakers: set[str] | frozenset[str] = frozenset(),
             business_speakers: set[str] | frozenset[str] = frozenset()) -> Analysis:
@@ -63,7 +98,7 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
     provider = extractor or RuleExtractor()
     signals = list(provider.extract(messages))
     _validate(signals, messages)
-    signals = _resolve_dates(signals, reference_date)
+    signals = _mark_superseded_slots(_resolve_dates(signals, reference_date))
     by_type: dict[str, list[Signal]] = {}
     for s in signals:
         by_type.setdefault(s.type, []).append(s)
@@ -112,16 +147,26 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
         signals.append(derived)
         missing.append(derived)
 
-    active_appointments = [] if inactive else by_type.get("appointment", []) + by_type.get("reschedule_request", [])
-    onsite = [s for s in active_appointments if re.search(ONSITE, s.evidence.text)]
-    if onsite:
-        origin = onsite[-1]
+    slots = by_type.get("appointment", []) + by_type.get("reschedule_request", [])
+    completed = by_type.get("appointment_completed", [])
+    active_appointments = [] if inactive else sorted(
+        (s for s in slots if _live(s) and not _after(s, completed)), key=lambda s: s.evidence.message_id)
+    reschedules = by_type.get("reschedule_request", [])
+    active_from = reschedules[-1].evidence.message_id if reschedules else -1
+    # The on-site nature comes from the whole deal: a bare "เลื่อนเป็นวันศุกร์" still concerns that job.
+    onsite = any(re.search(ONSITE, s.evidence.text) for s in slots)
+    rearranged = active_from >= 0 and _live(reschedules[-1])
+    if active_appointments and (onsite or rearranged):
+        origin = active_appointments[-1]
         located = any(re.search(LOCATION, m.text) and not re.search(r"(?:ขอ|ส่ง|แจ้ง|ยืนยัน).*ที่อยู่|ยังไม่|ไม่มี|ไม่ทราบ|สมมติว่า|ตัวอย่าง", m.text) for m in messages)
-        if not located:
+        if onsite and not located:
             need("installation_address", origin, "needed_for_onsite_schedule; not_found_in_supplied_messages")
-        appointment_dates = [s for s in signals if s.type == "schedule" or (s.type == "deadline" and any(a.evidence.message_id == s.evidence.message_id for a in active_appointments))]
+        # Only times from the active arrangement count; a superseded slot's time is history.
+        appointment_dates = [s for s in signals if _live(s) and s.evidence.message_id >= active_from
+                             and (s.type == "schedule" or (s.type == "deadline" and any(a.evidence.message_id == s.evidence.message_id for a in active_appointments)))]
         if not any(s.value["kind"] == "time" for s in appointment_dates):
-            need("appointment_time", origin, "needed_for_onsite_schedule; not_found_in_supplied_messages")
+            need("appointment_time", origin, ("needed_for_rescheduled_slot" if rearranged else "needed_for_onsite_schedule")
+                 + "; not_found_in_supplied_messages")
     if accepted and opportunity.amount is None:
         need("agreed_price", by_type["customer_acceptance"][-1], "customer_accepted_but_no_single_business_price_found")
 
@@ -139,17 +184,42 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
         propose("confirm_deal_status", "ยืนยันกับลูกค้าให้ชัดเจนก่อนบันทึกว่าตกลงซื้อหรือยกเลิก",
                 [s for s in signals if s.id in status_sources])
     if not inactive:
-        # Closed/reported events are history, not unfulfilled commitments.
-        quotes = [s for s in by_type.get("business_commitment", []) if s.value == "send_quotation"]
-        sent = by_type.get("quotation_sent", [])
-        open_quotes = [s for s in quotes if not any(done.evidence.message_id > s.evidence.message_id for done in sent)]
-        propose("send_quotation", "จัดเตรียมและส่งใบเสนอราคาที่รับปากไว้", open_quotes or (by_type.get("quotation_request", []) if not sent and opportunity.amount is None else []))
+        # Closed/reported events are history, not unfulfilled commitments. Each kind of commitment
+        # is closed only by evidence about that kind: a payment report cannot prove attendance.
+        delivered = by_type.get("quotation_sent", []) + by_type.get("quotation_received", [])
+        open_quotes = [s for s in by_type.get("business_commitment", []) if s.value == "send_quotation" and not _after(s, delivered)]
+        open_requests = [s for s in by_type.get("quotation_request", []) if not _after(s, delivered)]
+        if open_quotes:
+            propose("send_quotation", "จัดเตรียมและส่งใบเสนอราคาที่รับปากไว้",
+                    sorted(open_quotes + open_requests, key=lambda s: s.evidence.message_id))
+        else:
+            propose("send_quotation", "ลูกค้าขอใบเสนอราคาเป็นเอกสาร: จัดเตรียมและส่งให้ลูกค้า (ราคาในแชตยังไม่ใช่ใบเสนอราคา)", open_requests)
+        priced = [s for s in amounts if s.actor == "business"] + delivered
+        propose("answer_price_enquiry", "ตอบราคาที่ลูกค้าสอบถาม โดยตรวจสอบราคาก่อนส่ง",
+                [s for s in by_type.get("price_enquiry", []) if not _after(s, priced)])
+        offers = {s.evidence.message_id: s for s in by_type.get("information_offer", [])}
+        info_sent = by_type.get("information_sent", [])
+        for accepted_info in by_type.get("information_accepted", []):
+            if accepted_info.value != "quotation" and not _after(accepted_info, info_sent):
+                offer_signal = offers.get(accepted_info.metadata.get("offer_message_id"))
+                propose("send_offered_information", f"ส่งข้อมูลที่ลูกค้าตอบรับ ({accepted_info.value}); ไม่ใช่การยืนยันการซื้อ",
+                        [x for x in (offer_signal, accepted_info) if x is not None])
+        payments_reported = by_type.get("payment_reported", [])
+
+        def is_open(c: Signal) -> bool:
+            if c.value == "send_quotation":
+                return c in open_quotes
+            if c.value in PAYMENT_COMMITMENTS:
+                return not _after(c, payments_reported)
+            if c.value in APPOINTMENT_COMMITMENTS:
+                return _live(c) and not _after(c, completed)
+            return True
+
         commitments = by_type.get("business_commitment", []) + by_type.get("customer_commitment", [])
-        completed_payments = by_type.get("payment_reported", [])
-        open_commitments = [s for s in commitments if s in open_quotes or s.value == "reserve_or_attend_appointment" or (s.type == "customer_commitment" and not any(p.evidence.message_id > s.evidence.message_id for p in completed_payments))]
+        open_commitments = sorted((c for c in commitments if is_open(c)), key=lambda c: c.evidence.message_id)
         propose("track_commitment", "ตรวจติดตามสิ่งที่รับปากไว้ โดยยืนยันกับผู้รับผิดชอบก่อนดำเนินการ", open_commitments)
         payment_commitments = [s for s in by_type.get("customer_commitment", []) if s.value in {"make_payment", "pay_deposit"}]
-        propose("check_payment", "ตรวจสอบยอดเงินจริงก่อนสรุปว่าได้รับชำระแล้ว", payment_commitments + by_type.get("payment_pending", []) + completed_payments)
+        propose("check_payment", "ตรวจสอบยอดเงินจริงก่อนสรุปว่าได้รับชำระแล้ว", payment_commitments + by_type.get("payment_pending", []) + payments_reported)
         propose("provide_payment_details", "ตรวจสอบและส่งรายละเอียดการชำระเงินที่ถูกต้องให้ลูกค้า (ยังไม่ใช่การยืนยันการขาย)",
                 [s for s in by_type.get("payment_signal", []) if s.value == "account_number_request"])
         propose("confirm_appointment", "ยืนยันวัน เวลา และสถานที่นัดกับลูกค้า", active_appointments)
@@ -159,7 +229,7 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
             propose("follow_up_customer", "สอบถามการตัดสินใจของลูกค้า โดยเคารพคำขอคิดก่อน", follow_sources or by_type.get("customer_interest", []))
         open_deadlines = [s for s in by_type.get("deadline", []) if any(c.evidence.message_id == s.evidence.message_id for c in open_commitments)]
         propose("schedule_follow_up", "กำหนดเวลาติดตามโดยยืนยันวันที่สัมพัทธ์ก่อน", open_deadlines)
-        propose("add_to_revenue_radar", "ติดตามโอกาสรายได้และสถานะถัดไป; ยังไม่ใช่รายได้ที่รับรู้", ([s for s in amounts if s.id in opportunity.signal_ids] or by_type.get("customer_interest", []) or by_type.get("quotation_request", []) or open_quotes))
+        propose("add_to_revenue_radar", "ติดตามโอกาสรายได้และสถานะถัดไป; ยังไม่ใช่รายได้ที่รับรู้", ([s for s in amounts if s.id in opportunity.signal_ids] or by_type.get("customer_interest", []) or by_type.get("quotation_request", []) or by_type.get("price_enquiry", []) or open_quotes))
     warnings = []
     if any(m.actor == "unknown" for m in messages):
         warnings.append("unknown_speakers_require_review; use ลูกค้า: / ร้าน:")
@@ -168,6 +238,8 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
         warnings.append("some_dates_unresolved; no_overdue_inference" if reference_date else "dates_are_unresolved; no_reference_date_supplied")
     if len(latest) > 1 and not unambiguous:
         warnings.append("multiple_price_options; opportunity_amount_requires_review")
+    if any(not _live(s) for s in signals):
+        warnings.append("appointment_rescheduled; earlier_slot_superseded")
     if by_type.get("payment_reported"):
         warnings.append("payment_reported_not_verified")
     if state in {"possible_acceptance", "changed_needs_review", "cancellation_needs_review"}:

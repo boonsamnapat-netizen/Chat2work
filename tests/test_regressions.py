@@ -22,10 +22,18 @@ def types(analysis):
 
 # --- false confirmed sales -------------------------------------------------
 
-@pytest.mark.parametrize("question", ["ส่งแคตตาล็อกให้ดูไหมครับ", "รับน้ำเปล่าไหมครับ", "ขอส่งรูปผลงานให้ดูไหม", "โทรคุยได้ไหมครับ"])
+@pytest.mark.parametrize("question", ["รับน้ำเปล่าไหมครับ", "โทรคุยได้ไหมครับ"])
 def test_bare_yes_to_non_purchase_question_is_not_a_sale(question):
     a = analyze(f"ร้าน: {question}\nลูกค้า: เอาครับ")
     assert not a.confirmed_sale and a.deal_status == "possible_acceptance" and a.review_required
+
+
+# v0.1.1: an accepted information offer is recorded as such (no longer a vague possible_acceptance).
+@pytest.mark.parametrize("question", ["ส่งแคตตาล็อกให้ดูไหมครับ", "ขอส่งรูปผลงานให้ดูไหม"])
+def test_bare_yes_to_information_offer_is_not_a_sale(question):
+    a = analyze(f"ร้าน: {question}\nลูกค้า: เอาครับ")
+    assert not a.confirmed_sale and "customer_acceptance" not in types(a)
+    assert "information_accepted" in types(a) and "send_offered_information" in {x.type for x in a.recommended_actions}
 
 
 @pytest.mark.parametrize("question", ["ราคา 9,000 บาท รับไหมครับ", "เอาตัวนี้ไหมครับ", "ตกลงตามนี้ไหมครับ"])

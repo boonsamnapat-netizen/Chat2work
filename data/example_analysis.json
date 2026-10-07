@@ -1,6 +1,6 @@
 {
   "schema_version": "0.1",
-  "provider": "thai_rules_v0.1",
+  "provider": "thai_rules_v0.1.1",
   "reference_date": null,
   "messages": [
     {
@@ -181,18 +181,18 @@
     {
       "id": "s10",
       "type": "missing_information",
-      "actor": "customer",
+      "actor": "business",
       "value": "installation_address",
       "confidence": 0.84,
       "evidence": {
-        "message_id": 2,
-        "speaker": "ลูกค้า",
-        "text": "ถ้าได้อยากติดวันเสาร์",
-        "raw_line": "ลูกค้า: ถ้าได้อยากติดวันเสาร์"
+        "message_id": 3,
+        "speaker": "ร้าน",
+        "text": "ได้ครับ เดี๋ยวล็อกคิวไว้ให้",
+        "raw_line": "ร้าน: ได้ครับ เดี๋ยวล็อกคิวไว้ให้"
       },
       "metadata": {
         "derived_from": [
-          "s6"
+          "s8"
         ],
         "reason": "needed_for_onsite_schedule; not_found_in_supplied_messages"
       },
@@ -201,18 +201,18 @@
     {
       "id": "s11",
       "type": "missing_information",
-      "actor": "customer",
+      "actor": "business",
       "value": "appointment_time",
       "confidence": 0.84,
       "evidence": {
-        "message_id": 2,
-        "speaker": "ลูกค้า",
-        "text": "ถ้าได้อยากติดวันเสาร์",
-        "raw_line": "ลูกค้า: ถ้าได้อยากติดวันเสาร์"
+        "message_id": 3,
+        "speaker": "ร้าน",
+        "text": "ได้ครับ เดี๋ยวล็อกคิวไว้ให้",
+        "raw_line": "ร้าน: ได้ครับ เดี๋ยวล็อกคิวไว้ให้"
       },
       "metadata": {
         "derived_from": [
-          "s6"
+          "s8"
         ],
         "reason": "needed_for_onsite_schedule; not_found_in_supplied_messages"
       },
@@ -240,18 +240,18 @@
     {
       "id": "s10",
       "type": "missing_information",
-      "actor": "customer",
+      "actor": "business",
       "value": "installation_address",
       "confidence": 0.84,
       "evidence": {
-        "message_id": 2,
-        "speaker": "ลูกค้า",
-        "text": "ถ้าได้อยากติดวันเสาร์",
-        "raw_line": "ลูกค้า: ถ้าได้อยากติดวันเสาร์"
+        "message_id": 3,
+        "speaker": "ร้าน",
+        "text": "ได้ครับ เดี๋ยวล็อกคิวไว้ให้",
+        "raw_line": "ร้าน: ได้ครับ เดี๋ยวล็อกคิวไว้ให้"
       },
       "metadata": {
         "derived_from": [
-          "s6"
+          "s8"
         ],
         "reason": "needed_for_onsite_schedule; not_found_in_supplied_messages"
       },
@@ -260,18 +260,18 @@
     {
       "id": "s11",
       "type": "missing_information",
-      "actor": "customer",
+      "actor": "business",
       "value": "appointment_time",
       "confidence": 0.84,
       "evidence": {
-        "message_id": 2,
-        "speaker": "ลูกค้า",
-        "text": "ถ้าได้อยากติดวันเสาร์",
-        "raw_line": "ลูกค้า: ถ้าได้อยากติดวันเสาร์"
+        "message_id": 3,
+        "speaker": "ร้าน",
+        "text": "ได้ครับ เดี๋ยวล็อกคิวไว้ให้",
+        "raw_line": "ร้าน: ได้ครับ เดี๋ยวล็อกคิวไว้ให้"
       },
       "metadata": {
         "derived_from": [
-          "s6"
+          "s8"
         ],
         "reason": "needed_for_onsite_schedule; not_found_in_supplied_messages"
       },
@@ -333,10 +333,10 @@
       ],
       "evidence": [
         {
-          "message_id": 2,
-          "speaker": "ลูกค้า",
-          "text": "ถ้าได้อยากติดวันเสาร์",
-          "raw_line": "ลูกค้า: ถ้าได้อยากติดวันเสาร์"
+          "message_id": 3,
+          "speaker": "ร้าน",
+          "text": "ได้ครับ เดี๋ยวล็อกคิวไว้ให้",
+          "raw_line": "ร้าน: ได้ครับ เดี๋ยวล็อกคิวไว้ให้"
         }
       ],
       "confidence": 0.84,

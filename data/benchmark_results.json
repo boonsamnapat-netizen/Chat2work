@@ -314,5 +314,95 @@
     ],
     "limitations": "Hand-authored synthetic Thai conversations; no real-world accuracy or human usefulness established.",
     "failed_gates": []
+  },
+  {
+    "dataset": "holdout3.jsonl",
+    "split": "holdout3",
+    "cases": 20,
+    "industries": [
+      "agency",
+      "air_conditioning",
+      "cctv",
+      "contractor",
+      "electrical",
+      "freelance_design",
+      "interior",
+      "printing",
+      "repair",
+      "solar"
+    ],
+    "metrics": {
+      "commitments": {
+        "tp": 7,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "exact_case_accuracy": 1.0
+      },
+      "amounts": {
+        "tp": 20,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "exact_case_accuracy": 1.0
+      },
+      "amount_roles": {
+        "tp": 20,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "exact_case_accuracy": 1.0
+      },
+      "dates": {
+        "tp": 12,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "exact_case_accuracy": 1.0
+      },
+      "commercial_intent": {
+        "tp": 20,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "exact_case_accuracy": 1.0
+      },
+      "decision_pending": {
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "exact_case_accuracy": 1.0
+      },
+      "confirmed_sale": {
+        "tp": 7,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "exact_case_accuracy": 1.0
+      }
+    },
+    "confirmed_sale_false_positive_rate": 0.0,
+    "negative_sale_cases": 13,
+    "false_confirmed_sales": 0,
+    "opportunity_amount_accuracy": 1.0,
+    "human_rated_action_usefulness": null,
+    "failures": [],
+    "limitations": "Hand-authored synthetic Thai conversations; no real-world accuracy or human usefulness established.",
+    "failed_gates": []
   }
 ]

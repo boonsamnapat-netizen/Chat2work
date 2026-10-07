@@ -6,7 +6,7 @@ import pytest
 from chat2work.evaluation.harness import evaluate, load, _score
 
 DATA = Path(__file__).resolve().parents[1] / "data"
-DATASETS = [DATA / "conversations.jsonl", DATA / "holdout.jsonl", DATA / "holdout2.jsonl"]
+DATASETS = [DATA / "conversations.jsonl", DATA / "holdout.jsonl", DATA / "holdout2.jsonl", DATA / "holdout3.jsonl"]
 INDUSTRIES = {"air_conditioning", "cctv", "electrical", "repair", "contractor", "printing",
               "freelance_design", "agency", "solar", "interior", "noncommercial"}
 

@@ -1,4 +1,4 @@
-# Chat2Work Core v0.1
+# Chat2Work Core v0.1.1
 
 **Thai-first conversation-to-action intelligence for small service businesses.**
 
@@ -136,7 +136,7 @@ Each action has the form:
 
 `message_id` starts at 0. Signal IDs are only unique within one analysis.
 
-## Output schema (v0.1)
+## Output schema (v0.1, unchanged in v0.1.1 apart from new signal and action types)
 
 | Field | Meaning |
 | --- | --- |
@@ -151,13 +151,32 @@ Each action has the form:
 | `reference_date`, `provider`, `schema_version` | provenance |
 
 Signal types emitted by the Thai rules:
-`commercial_intent`, `customer_interest`, `quotation_request`, `negotiation`, `decision_pending`,
-`customer_acceptance`, `possible_acceptance`, `customer_rejection`, `cancellation`, `change_of_mind`,
-`business_cancellation`, `reschedule_request`, `business_commitment` (`send_quotation`,
-`reserve_or_attend_appointment`), `customer_commitment` (`make_payment`, `pay_deposit`,
-`attend_appointment`), `quotation_sent`, `appointment`, `payment_signal` (incl. `account_number_request`),
-`payment_pending`, `payment_reported` (`verified: false`), `monetary_amount`, `deadline`, `schedule`,
-`temporal_mention`, and derived `missing_information`.
+
+| Area | Types |
+| --- | --- |
+| deal state | `commercial_intent`, `customer_interest`, `negotiation`, `decision_pending`, `customer_acceptance`, `possible_acceptance`, `customer_rejection`, `cancellation`, `change_of_mind`, `business_cancellation` |
+| information | `information_offer` (business offers a catalog, photos, sample, spec, link or quotation), `information_accepted` (customer accepts that offer; never a purchase), `information_sent` |
+| quotations and prices | `price_enquiry` (customer asks a price), `quotation_request` (customer asks for a quotation **document**), `quotation_sent` (business), `quotation_received` (customer) |
+| commitments | `business_commitment` (`send_quotation`, `reserve_or_attend_appointment`), `customer_commitment` (`make_payment`, `pay_deposit`, `attend_appointment`) |
+| appointments | `appointment`, `reschedule_request` (`reschedule_appointment` or `cancel_appointment_slot`, from either side), `appointment_completed` (reported, `verified: false`) |
+| payments | `payment_signal` (incl. `account_number_request`), `payment_pending`, `payment_reported` (`verified: false`) |
+| money and dates | `monetary_amount`, `deadline`, `schedule`, `temporal_mention` |
+| derived | `missing_information` |
+
+Signals that belong to a superseded appointment slot keep their evidence but carry
+`metadata.slot_status: "superseded"` and `superseded_by` (the reschedule signal). Dates inside a reschedule message
+are marked `superseded` (before `เลื่อน…`) or `replacement` (after it).
+
+Proposed action types:
+
+| Area | Actions |
+| --- | --- |
+| quotations and prices | `send_quotation`, `answer_price_enquiry` |
+| information | `send_offered_information` |
+| commitments and payments | `track_commitment`, `check_payment`, `provide_payment_details` |
+| appointments | `confirm_appointment` |
+| follow-up | `request_missing_information`, `follow_up_customer`, `schedule_follow_up`, `add_to_revenue_radar` |
+| deal state | `confirm_deal_status`, `confirm_cancellation` |
 
 `deal_status` is one of:
 
@@ -193,8 +212,23 @@ The rules guard these conservatively:
   not acceptance. The acceptance phrase must open the customer's own message.
 - **Short agreement after a price** (`ok ครับ`, `ตกลงครับ`, `ได้ครับ`): `possible_acceptance`, confidence 0.70.
   This needs review and proposes `confirm_deal_status`.
-- **Yes to an unrelated question.** If the shop asks a yes/no question that is not about buying
-  (`ส่งแคตตาล็อกให้ดูไหม`, `รับน้ำไหม`), a bare `เอาครับ` answers that question. It is not treated as a sale.
+- **What is being accepted.** A generic yes (`เอาครับ`, `ได้ครับ`, `ตกลงครับ`, `ส่งมาเลย`, or longer forms
+  such as `เอาครับ ส่งมาเลย`) is read against the shop's latest open yes/no question. That question can be
+  up to three messages back, as long as the customer hasn't already answered it. The question is classified by what it offers:
+
+  | Shop question offers | Example | Customer's yes becomes |
+  | --- | --- | --- |
+  | information | `รับแคตตาล็อกพร้อมราคาไหม`, `ส่งรูปแอร์ 18000 BTU ให้ดูไหม`, `ราคา 18,500 บาท ให้ส่งใบเสนอราคาให้ไหม` | `information_accepted`, never a sale. An accepted quotation offer also becomes a `quotation_request`. |
+  | purchase | `เอาตัวนี้ราคา 18,500 บาทไหม`, `สั่งเลยไหม`, `ราคา 9,000 บาท รับไหม` | acceptance (same guards as below) |
+  | both | `จะเอาตัวนี้เลยไหม หรือให้ส่งรูปให้ดูก่อน` | `possible_acceptance` (0.60, needs review) |
+  | scheduling | `นัดดูหน้างานวันเสาร์สะดวกไหม` | no acceptance signal; appointment signals cover it |
+  | something else | `รับน้ำไหม`, `โทรคุยได้ไหม` | `possible_acceptance` (0.60, needs review) |
+
+  A price, quantity or specification inside the question does **not** make it a purchase question.
+  A reply that names the purchase itself (`ยืนยันตามราคานี้`, `ยืนยันซ่อมตามราคานี้`, `ตกลงซื้อ`) is acceptance whatever was asked.
+  A reply that picks a product after an information offer (`ไม่ต้องครับ เอาตัวนี้เลย`) gets `possible_acceptance`.
+  So does a reply that mixes yes with a document request (`เอาครับ แต่ส่งใบเสนอราคามาด้วย`).
+  Declining offered information (`ไม่เอาครับ` to `ส่งแคตตาล็อกให้ดูไหม`) is not a deal rejection.
 - **Later messages change the current state.** Examples:
   - cancellation (`ขอยกเลิกออเดอร์`, `ไม่ซ่อมแล้ว`);
   - rejection (`ไม่เอาครับ`, `ไม่สนใจ`);
@@ -203,7 +237,7 @@ The rules guard these conservatively:
   - a business cancellation: needs review.
 
   The earlier acceptance evidence is kept.
-- **Not treated as cancellation:** rescheduling (`ยกเลิกนัด…เลื่อนเป็นวันศุกร์`), a question about
+- **Not treated as cancellation:** rescheduling (`ยกเลิกนัด…เลื่อนเป็นวันศุกร์`) or `เวลาเดี๋ยวแจ้งอีกที` about the new time, a question about
   cancelling (`ยกเลิกได้ไหม`), a conditional (`ถ้า…ขอยกเลิกได้นะ`), or a negation (`ไม่ยกเลิก`).
 - **Who said it.** Business statements (`ลูกค้าตกลงซื้อแล้ว`, `ล็อกคิวไว้ให้แล้ว`) and unknown speakers can never confirm a sale.
   An unknown speaker after an acceptance moves the deal to `acceptance_needs_review`.
@@ -299,7 +333,26 @@ Missing information is asked for only when the context needs it:
 - `installation_address` and `appointment_time` appear only when **on-site work is being arranged**.
   That covers an install, repair visit, or site survey with a date, queue, or appointment.
   Discussing an installation-inclusive price or asking `รวมติดตั้งหรือยัง` doesn't trigger them.
+- After a reschedule (by either side), only the **latest arrangement** counts.
+  - The earlier slot, its times, and its attendance commitments stay in `signals` but are marked `superseded`.
+  - `appointment_time` is requested again unless a time is given in or after the reschedule message.
+    For example, `ยกเลิกนัดวันเสาร์ เลื่อนเป็นวันศุกร์แทน แต่ยังไม่ทราบเวลา` requests a new time; the old `09:00` does not count.
+  - A reschedule never cancels the deal.
 - `agreed_price` appears only when the customer explicitly accepted and no single business price exists.
+
+## Commitment and request lifecycle
+
+Each open item closes only on evidence about that same item:
+
+| Open item | Closed by |
+| --- | --- |
+| quotation request / `send_quotation` promise | `quotation_sent` or `quotation_received` after it. A price typed in chat is **not** a quotation document. A later new request reopens it. |
+| price enquiry | a business amount or delivered quotation after it |
+| payment commitment | a later `payment_reported`. Reported payment is still unverified, so `check_payment` stays proposed. |
+| attendance / visit commitment | a later `appointment_completed`, or a reschedule that supersedes its slot. A payment report never closes it. |
+| accepted information offer | a later `information_sent` |
+
+A customer request alone never creates a business promise. For example, `send_quotation` triggered by a request says so in its description.
 - "Missing" means *not found in the supplied messages*, not that the business lacks it.
 
 ## Architecture
@@ -342,23 +395,33 @@ So adapters can't inject ungrounded actions, and they can't confirm a sale on th
 ## Tests and benchmark
 
 ```bash
-python -m pytest -q                     # 207 tests
-python evaluate.py                      # JSON report for all datasets
+python -m pytest -q                     # 282 tests
+python evaluate.py                      # JSON report for the four required splits
 python evaluate.py --check              # exit 1 if any technical gate is unmet
 python evaluate.py --dataset data/holdout2.jsonl --output report.json
 ```
+
+`evaluate.py` exits 2 with a message on stderr, and evaluates nothing, in these cases:
+- an explicitly selected dataset is missing or empty;
+- a required default split in `--data-dir` is missing;
+- the same dataset is selected twice.
+
+A missing split is never skipped silently.
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on Python 3.11, 3.12, and 3.13. Each run does the tests, the gated benchmark, and a sample CLI analysis, and uploads the JSON reports as artifacts.
 
 ### Datasets
 
-107 hand-written **synthetic** conversations across 10 industries plus non-commercial chat. Every case is labelled `synthetic: true`.
+127 hand-written **synthetic** conversations across 10 industries plus non-commercial chat. Every case is labelled `synthetic: true`.
 
 | File | Cases | How it was written | Blind? |
 | --- | --- | --- | --- |
 | `data/conversations.jsonl` (dev) | 46 | written together with the original rules (mostly 1–3 turns) | no, in-sample |
 | `data/holdout.jsonl` | 35 | written before running the engine on it; longer, more natural turns | first run only |
 | `data/holdout2.jsonl` | 26 | written after holdout-1 fixes, deliberately using phrasing the rules did not yet cover | first run only |
+| `data/holdout3.jsonl` | 20 | written for v0.1.1 after the five review fixes; labels frozen (SHA-256 in `blind_first_runs.json`) before the first run; targets informational vs purchase acceptance, quotations, payments + visits, rescheduling | first run only |
+
+The five review reproductions and their variations are regression tests (`tests/test_v011_safety.py`), not benchmark data.
 
 Gold labels per case:
 - `commercial_intent`, `decision_pending`, `confirmed_sale`;
@@ -371,7 +434,8 @@ Scenarios covered:
 - interest, inquiry, negotiation, pending decisions;
 - acceptance (explicit, casual, conditional, reported);
 - deposit promises, missed and reported payments;
-- quotation promises and sent quotations, vague appointments and rescheduling;
+- quotation promises, requests, and sent or received quotations; vague appointments, rescheduling, completed visits;
+- information offers (catalog, photos, samples, specs, links) accepted, declined, or mixed with a purchase question;
 - multiple amounts, total + deposit + balance, unit prices, quantity/time/phone traps;
 - cancellation and change of mind;
 - prompt-injection text, unknown speakers, timestamped exports, non-commercial chat.
@@ -391,33 +455,49 @@ Scenarios covered:
 
 These were measured locally on Python 3.13.16 and are reproduced by CI. Current results ([`data/benchmark_results.json`](data/benchmark_results.json)):
 
-| Metric (target) | dev, 46 cases | holdout, 35 | holdout2, 26 |
-| --- | --- | --- | --- |
-| Commitments F1 (≥ 0.90) | 1.000 (8 events) | 1.000 (12) | 1.000 (5) |
-| Amounts F1 (≥ 0.95) | 1.000 (31) | 1.000 (34) | 0.982 (P 1.00, R 0.96; 28 gold) |
-| Amount roles F1 | 1.000 | 1.000 | 0.982 |
-| Dates F1 (≥ 0.90) | 1.000 (10) | 1.000 (18) | 1.000 (11) |
-| Commercial intent F1 | 1.000 (44 pos.) | 1.000 (33) | 1.000 (25) |
-| Decision pending F1 | 1.000 (10 pos.) | 1.000 (8) | 1.000 (5) |
-| Confirmed sale F1 | 1.000 (6 pos.) | 1.000 (6) | 1.000 (7) |
-| False confirmed-sale rate (< 3%) | 0 / 40 | 0 / 29 | 0 / 19 |
+| Metric (target) | dev, 46 cases | holdout, 35 | holdout2, 26 | holdout3, 20 |
+| --- | --- | --- | --- | --- |
+| Commitments F1 (≥ 0.90) | 1.000 (8 events) | 1.000 (12) | 1.000 (5) | 1.000 (7) |
+| Amounts F1 (≥ 0.95) | 1.000 (31) | 1.000 (34) | 0.982 (P 1.00, R 0.96; 28 gold) | 1.000 (20) |
+| Amount roles F1 | 1.000 | 1.000 | 0.982 | 1.000 |
+| Dates F1 (≥ 0.90) | 1.000 (10) | 1.000 (18) | 1.000 (11) | 1.000 (12) |
+| Commercial intent F1 | 1.000 (44 pos.) | 1.000 (33) | 1.000 (25) | 1.000 (20) |
+| Decision pending F1 | 1.000 (10 pos.) | 1.000 (8) | 1.000 (5) | 1.000 (2) |
+| Confirmed sale F1 | 1.000 (6 pos.) | 1.000 (6) | 1.000 (7) | 1.000 (7) |
+| False confirmed-sale rate (< 3%) | 0 / 40 | 0 / 29 | 0 / 19 | 0 / 13 |
 
-**These current numbers are not blind.** The rules were changed after studying the errors on both holdouts. The more honest estimate is the **first run on each holdout, before any fix it informed** ([`data/blind_first_runs.json`](data/blind_first_runs.json)):
+The v0.1.1 changes left the dev, holdout, and holdout2 scores byte-identical to v0.1.
+
+**These current numbers are not blind.** The rules were changed after studying the errors on every holdout. The more honest estimate is the **first run on each holdout, before any fix it informed** ([`data/blind_first_runs.json`](data/blind_first_runs.json)):
 
 | First blind run | Commitments F1 | Amounts F1 | Dates F1 | Pending F1 | Sale F1 | False sales |
 | --- | --- | --- | --- | --- | --- | --- |
 | holdout (unmodified candidate engine) | 0.909 | 0.986 | 0.914 | 0.769 | 0.727 | **1 / 29 (3.4%)** |
 | holdout2 (after holdout-1 fixes) | **0.800** | 0.982 | **0.706** | 0.500 | 0.923 | 0 / 19 |
+| holdout3 (v0.1.1 after the review fixes) | **0.857** | 1.000 | 1.000 | 0.800 | 0.727 | 0 / 13 |
 
-On holdout2's first run, commitment and date detection **missed the targets** on phrasing the rules hadn't seen. Expect similar drops on real chats.
+On each first run, at least one metric **missed its target** on phrasing the rules hadn't seen. Expect similar drops on real chats.
+On holdout3, the misses were three real sales the engine did not confirm, plus one wrong and one missing attendance commitment.
+None were false sales.
 
-Across all three sets, 0 false confirmed sales were found in 88 negative conversations. With 88 negatives, the 95% upper bound on the true rate is about 3.4% (rule of three). So **this sample cannot prove the < 3% target** even on synthetic data.
+Across all four sets, 0 false confirmed sales were found in 101 negative conversations. The 95% upper bound on the true rate is about 3.0% (rule of three).
+That sits at the target. Most of these sets were also used for tuning, and all are synthetic, so **this does not demonstrate the < 3% target**.
+The independent review also found four false sales outside these sets in v0.1 (fixed in v0.1.1).
 
 **Human-rated next-action usefulness (target ≥ 80%) has not been measured.** It is `null` in every report, and no claim is made about it.
 
 ## Limitations
 
 - **Synthetic, small, and Thai-rule-specific.** Small samples (5–12 commitment events per set). The real-world accuracy is unknown.
+- **Offer classification is keyword-based.**
+  - The "what is being accepted" logic only looks at the shop's latest open question, up to three messages back.
+  - It recognizes a fixed list of information objects: catalog, photos/video, sample, spec/details/PDF, link, quotation.
+  - Offers phrased without those words, or without a send/receive verb, fall back to the older rules.
+  - Accepting information after an earlier, separate purchase offer is not linked to that offer.
+- **Appointment lifecycle is single-slot.**
+  - Only the latest reschedule is active.
+  - Completion reports (`ติดตั้งเสร็จแล้ว`) are unverified and close every earlier attendance commitment.
+  - There is no notion of several visits for one job.
 - **Pattern coverage.** Regex rules miss unseen phrasing, slang, misspellings, sarcasm, dialects, and emoji-only replies.
   Commercial intent is keyword-based. Conservative guards (any `ไม่`, `ยัง`, `ก่อน`, or question in an acceptance message) trade recall for safety. For example, `เอาครับ เดี๋ยวโอนก่อน` is not counted as a sale.
 - **Money.**

@@ -3,4 +3,4 @@ from .engine import analyze
 from .models import Analysis, Message
 
 __all__ = ["analyze", "Analysis", "Message"]
-__version__ = "0.1.0"
+__version__ = "0.1.1"
