@@ -301,5 +301,23 @@
       "h4_agency_no_quote_needed",
       "h4_interior_loyal_customer"
     ]
+  },
+  "action_scenarios.jsonl": {
+    "engine": "v0.1.3 after the nine-group fixes, before any scenario-informed change",
+    "labels_frozen_sha256": "b31df0fbb61e83a0256ef95ea45cb0c30d4f0e81cd6139a946abd6fc21d52874",
+    "cases": 24,
+    "action_case_accuracy": 0.9583333333333334,
+    "required_action_recall": 1.0,
+    "forbidden_action_rate": 0.0,
+    "open_obligation_accuracy": 0.9583333333333334,
+    "sale_recall": 1.0,
+    "confirmed_sale_false_positive_rate": 0.0,
+    "false_confirmed_sales": 0,
+    "negative_sale_cases": 19,
+    "review_rate": 0.4583333333333333,
+    "sale_abstention_rate": 0.041666666666666664,
+    "failed_case_ids": [
+      "a09_partial_payment"
+    ]
   }
 }

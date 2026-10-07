@@ -63,7 +63,10 @@ def _role(prefix: str, after: str) -> str:
     # Amounts that are part of the deal but are not its selling price.
     if near(r"แถม|ฟรี"):
         return "gift_value"
-    if re.match(r"\s*(?:บาท)?\s*(?:ครับ|ค่ะ)?\s*(?:รวม(?:อยู่)?ใน(?:ราคา)?|รวมแล้ว|รวมไว้แล้ว)", after):
+    if re.match(r"\s*(?:บาท)?\s*(?:ครับ|ค่ะ)?\s*(?:รวม(?:อยู่|ไว้)?ใน(?:ราคา)?|รวมแล้ว|รวมไว้แล้ว)", after):
+        return "included_component"
+    # "รวมค่าแรงไว้แล้ว 1500" names an included component; "ราคานี้รวมค่าแรงแล้ว 18,500" is the total.
+    if near(r"รวม\s*ค่า\S{0,12}") and not near(r"(?:ราคา|ยอด)\S{0,8}รวม"):
         return "included_component"
     if near(r"จ่าย(?:ค่า)?|ซื้อ\S{0,10}มา|ต้นทุน|ค่าใช้จ่าย"):
         return "paid"  # the extractor maps this to expense (business) or payment (customer)
@@ -71,10 +74,13 @@ def _role(prefix: str, after: str) -> str:
         return "budget"
     if near(r"ราคาเดิม"):
         return "previous_price"
-    if near(r"ส่วนลด|ลดให้|ลด\s*$"):
-        return "discount"
     if near(r"คงเหลือ|เหลือจ่าย|ที่เหลือ|ยอดค้าง"):
         return "balance"
+    # "ลดให้เหลือ 17,000" is the revised net price; "ลดให้ 1,500" is the discount amount.
+    if near(r"เหลือ"):
+        return "price"
+    if near(r"ส่วนลด|ลดให้|ลด\s*$"):
+        return "discount"
     if near(r"โอน|ชำระ"):
         return "payment"
     if near(PER_UNIT) or re.match(r"\s*(?:บาท)?\s*(?:ต่อ|/)\s*\S", after):

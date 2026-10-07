@@ -1,4 +1,4 @@
-# Chat2Work Core v0.1.2
+# Chat2Work Core v0.1.3
 
 **Thai-first conversation-to-action intelligence for small service businesses.**
 
@@ -136,7 +136,7 @@ Each action has the form:
 
 `message_id` starts at 0. Signal IDs are only unique within one analysis.
 
-## Output schema (v0.1; v0.1.1 and v0.1.2 only add signal/action types, money roles and metadata)
+## Output schema (v0.1; v0.1.1–v0.1.3 only add signal/action types, money roles and metadata)
 
 | Field | Meaning |
 | --- | --- |
@@ -155,11 +155,12 @@ Signal types emitted by the Thai rules:
 | Area | Types |
 | --- | --- |
 | deal state | `commercial_intent`, `customer_interest`, `negotiation`, `decision_pending`, `customer_acceptance`, `possible_acceptance`, `customer_rejection`, `cancellation`, `reported_cancellation` (someone else's words; needs review), `change_of_mind`, `business_cancellation` |
-| information | `information_offer` (business offers a catalog, photos, sample, spec, link or quotation, as a question or a statement), `information_accepted` (customer accepts that offer; never a purchase; may carry `deferred: true`), `information_sent` |
+| information | `information_offer` (business offers a catalog, photos, sample, spec, link or quotation, as a question or a statement such as `ส่งแคตตาล็อกให้ครับ`), `information_accepted` (customer accepts that offer; never a purchase; may carry `deferred: true`), `information_requested` (customer asks for it now; a go-ahead), `information_declined`, `information_sent` |
 | quotations and prices | `price_enquiry` (customer asks a price), `quotation_request` (customer asks for a quotation **document**), `quotation_question` (asks *about* one), `quotation_declined`, `quotation_sent` (business sent the **document**), `quotation_received` (customer), `price_sent` (a price given in chat) |
-| commitments | `business_commitment` (`send_quotation`, `reserve_or_attend_appointment`), `customer_commitment` (`make_payment`, `pay_deposit`, `attend_appointment`) |
-| appointments | `appointment`, `reschedule_request` (`reschedule_appointment` or `cancel_appointment_slot`, from either side), `appointment_completed` (reported, `verified: false`) |
-| payments | `payment_signal` (incl. `account_number_request`), `payment_pending`, `payment_reported` (`verified: false`), `payment_reschedule_request` (moves a payment, never the appointment) |
+| commitments | `business_commitment` (`send_quotation`, `reserve_or_attend_appointment`), `customer_commitment` (`make_payment`, `pay_deposit`, `attend_appointment`; payment ones may carry `amount` and `purpose: "remaining_balance"`) |
+| appointments | `appointment`, `reschedule_request` (`reschedule_appointment` or `cancel_appointment_slot`, from either side), `appointment_completed` (asserted report, `verified: false`), `completion_uncertain` (hedged or asked: `เสร็จแล้วมั้ง`) |
+| payments | `payment_signal` (incl. `account_number_request`), `payment_pending`, `payment_reported` (`verified: false`, optional `reported_amount`), `payment_reschedule_request` (moves a payment, never the appointment) |
+| other reschedules | `deliverable_reschedule_request` (moves photos, a catalog or a quotation; never the appointment) |
 | money and dates | `monetary_amount`, `deadline`, `schedule`, `temporal_mention` |
 | derived | `missing_information` |
 
@@ -174,7 +175,7 @@ Proposed action types:
 | quotations and prices | `send_quotation`, `answer_price_enquiry` |
 | information | `send_offered_information`, `await_customer_go_ahead` (the customer said not to send yet) |
 | commitments and payments | `track_commitment`, `check_payment`, `provide_payment_details`, `confirm_payment_schedule` |
-| appointments | `confirm_appointment` |
+| appointments | `confirm_appointment`, `verify_completion` (completion was hedged or asked) |
 | follow-up | `request_missing_information`, `follow_up_customer`, `schedule_follow_up`, `add_to_revenue_radar` |
 | deal state | `confirm_deal_status`, `confirm_cancellation` |
 
@@ -186,6 +187,36 @@ Proposed action types:
 | undecided | `decision_pending`, `negotiating` |
 | outcome | `accepted`, `cancelled`, `declined` |
 | needs a human to check | `possible_acceptance`, `acceptance_needs_review`, `changed_needs_review`, `cancellation_needs_review` |
+
+## Event classification (v0.1.3)
+
+Before the rules change a deal state, close an obligation, supersede a slot or pick a revenue value,
+they classify the event in a small explicit layer ([`chat2work/extractors/semantics.py`](chat2work/extractors/semantics.py)):
+
+1. **Clauses.** A message is split at spaces and clause-starting conjunctions (`แต่`, `และ`, `ที่เหลือ`).
+   Latin words, numbers, amounts and particles (`PDF`, `1000`, `บาท`, `ให้`, `ทาง`, `นะ`, `ครับ`) stay in the clause.
+2. **Status of the event's clause.** One of these:
+
+   | Status | Example |
+   | --- | --- |
+   | `asserted` | the plain statement |
+   | `negated` | `ยังไม่ได้ส่ง` |
+   | `conditional` | `ถ้า…`, `พอ…`, `หลังจาก…`, or the clause after `แต่ถ้า…` |
+   | `future` | `พรุ่งนี้จะส่ง…` |
+   | `questioned` | `ส่งแล้วใช่ไหม`, `หรือยัง`; polite `…ได้ไหม` requests still count as requests |
+   | `reported` | `เพื่อนบอกว่า…` |
+   | `uncertain` | `มั้ง`, `น่าจะ`, `คิดว่า`, `ไม่แน่ใจ` |
+
+3. **Target.** The object after the event word: purchase, document, information, payment or appointment.
+
+Only an **asserted, completed** event closes something:
+- delivered documents and information;
+- received quotations;
+- reported payments, using `แล้ว` or the colloquial clause-final `ละ`;
+- completed work.
+
+Decisions, i.e. refusal and cancellation, are read per clause after courtesy and pronouns (`ขอโทษครับ ไม่จ้างครับ`, `ผมไม่ซื้อครับ`). An unrelated `แล้ว` elsewhere in the message no longer suppresses them.
+The layer is a heuristic for Thai chat, not a parser.
 
 ## Sales safety (no false confirmed sales)
 
@@ -276,7 +307,7 @@ Amounts are decimal **strings**, never floats. Each amount carries a role:
 | `unit_price` | `ตัวละ`, `เดือนละ`, `ผืนละ`, `บาท/เครื่อง` |
 | `balance` | `ส่วนที่เหลือ`, `ยอดค้างชำระ` |
 | `previous_price` | `ราคาเดิม` |
-| `discount` | `ส่วนลด`, `ลด 500` |
+| `discount` | `ส่วนลด`, `ลด 500`, `ลดให้ 1,500` (`ลดให้เหลือ 17,000` is the revised net **price**) |
 | `payment` | `โอน 5,000 บาท` |
 
 **Supported formats:**
@@ -298,7 +329,7 @@ Amounts are decimal **strings**, never floats. Each amount carries a role:
 | Role | Example |
 | --- | --- |
 | `gift_value` | `แถมขาแขวนมูลค่า 500 บาท` |
-| `included_component` | `ค่าแรง 1500 บาทรวมอยู่ในราคาแล้ว` |
+| `included_component` | `ค่าแรง 1500 บาทรวมอยู่ในราคาแล้ว`, `รวมค่าแรงไว้แล้ว 1500 บาท` (but `ราคานี้รวมค่าแรงแล้ว 18,500 บาท` is the total) |
 | `expense` | `จ่ายค่าอะไหล่ 1500 บาท` said by the shop (said by the customer, it is a `payment`) |
 
 A budget needs a real budget word: `งบ` at a word start or after `มี`/`ใช้`/`ตั้ง`/`ใน`/`ได้`. So `ช่างบอกราคา 18,500 บาท` and `ทั้งบ้าน 22,000 บาท` are prices.
@@ -369,9 +400,12 @@ Each open item closes only on evidence about that same item:
 | quotation request / document promise | `quotation_sent` (the business says the **document** was sent) or `quotation_received` after it, or `quotation_declined`. A price typed or "sent" in chat (`ส่งราคาให้แล้ว 18,500 บาท`) is `price_sent` and does **not** close it. A later new request reopens it. |
 | price promise (`เดี๋ยวส่งราคาให้`) | `price_sent` or a delivered quotation |
 | price enquiry | a business amount, `price_sent`, or a delivered quotation after it |
-| payment commitment | a later `payment_reported`. Reported payment is still unverified, so `check_payment` stays proposed. |
+| payment commitment | a later **asserted** `payment_reported` (`ถ้าโอนแล้วจะส่งสลิป` is not one). Reported payment is still unverified, so `check_payment` stays proposed. A **partial** report (`โอนแล้ว 1000 บาท` against a 5,000 promise) keeps the commitment open with the warning `partial_payment_reported`. A stated remainder (`ที่เหลืออีก 4000 จะโอนพรุ่งนี้`) becomes its own open commitment, with its amount, deadline and the original purpose. |
+| deferred quotation / information | a deferral (`เอาครับ แต่ยังไม่ต้องส่ง`, also inside the request itself) puts the promise or request on hold. That gives `await_customer_go_ahead` with the promise as evidence, and no send-now or follow-up-date proposal. A later go-ahead (`ส่ง…มาได้แล้ว`, `ขอ…ตอนนี้เลย`) reopens the send action. |
 | attendance / visit commitment | a later **asserted** `appointment_completed`, or a reschedule that supersedes its slot. A payment report never closes it. Conditional, future, hedged, negated or questioned completion (`ถ้าติดตั้งเสร็จแล้วจะโทรแจ้ง`, `พอทำเสร็จแล้ว…`, `น่าจะเสร็จแล้ว`, `เสร็จหรือยัง`) does not. |
-| payment timing | a payment reschedule (`ขอเลื่อนโอนมัดจำไปวันศุกร์`) proposes `confirm_payment_schedule`. It never supersedes the appointment, even when both are moved in one message. |
+| payment timing | a payment reschedule (`ขอเลื่อนโอนมัดจำไปวันศุกร์`, `ขอเลื่อนวันที่โอนมัดจำ…`) proposes `confirm_payment_schedule`. It never supersedes the appointment, even when both are moved in one message. Moving photos, a catalog or a quotation (`ขอเลื่อนส่งรูป…`, `ขอเลื่อนวันส่งใบเสนอราคา…`) is a `deliverable_reschedule_request` and leaves the installation untouched. |
+| uncertain completion | `completion_uncertain` keeps the commitment tracked and proposes `verify_completion` |
+| cancelled document | `ยกเลิกใบเสนอราคา…` withdraws the quotation request (`quotation_declined`), not the purchase |
 | accepted information offer | a later `information_sent` |
 
 A customer request alone never creates a business promise. For example, `send_quotation` triggered by a request says so in its description.
@@ -425,8 +459,8 @@ So adapters can't inject ungrounded actions, and they can't confirm a sale on th
 ## Tests and benchmark
 
 ```bash
-python -m pytest -q                     # 427 tests
-python evaluate.py                      # JSON report for the five required splits
+python -m pytest -q                     # 538 tests
+python evaluate.py                      # JSON report: five label splits + the action-scenario set
 python evaluate.py --check              # exit 1 if any technical gate is unmet
 python evaluate.py --dataset data/holdout2.jsonl --output report.json
 ```
@@ -442,7 +476,7 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on Python 3.11, 3.12, and 3.13.
 
 ### Datasets
 
-147 hand-written **synthetic** conversations across 10 industries plus non-commercial chat. Every case is labelled `synthetic: true`.
+171 hand-written **synthetic** conversations (147 label cases + 24 action scenarios) across 10 industries plus non-commercial chat. Every case is labelled `synthetic: true`.
 
 | File | Cases | How it was written | Blind? |
 | --- | --- | --- | --- |
@@ -452,6 +486,8 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on Python 3.11, 3.12, and 3.13.
 | `data/holdout3.jsonl` | 20 | written for v0.1.1 after the five review fixes; labels frozen (SHA-256 in `blind_first_runs.json`) before the first run; targets informational vs purchase acceptance, quotations, payments + visits, rescheduling | first run only |
 
 | `data/holdout4.jsonl` | 20 | written for v0.1.2 after the expanded-review fixes; labels frozen before the first run; targets statement offers, explicit vs reported rejection, quotation speech acts, asserted completion, payment vs appointment rescheduling, phone/gift/expense/budget money traps, short years, address changes | first run only |
+
+| `data/action_scenarios.jsonl` | 24 | written for v0.1.3 after the nine-group fixes; labels frozen before the first run. Each case lists required actions, forbidden actions and the exact set of still-open obligations. | first run only |
 
 Review reproductions and their variations are regression tests (`tests/test_v011_safety.py`, `tests/test_v012_semantics.py`), not benchmark data.
 
@@ -482,6 +518,10 @@ Scenarios covered:
 | Dates | micro P/R/F1 over raw `deadline` + `schedule` expressions; resolution is tested separately in unit tests |
 | Commercial intent, decision pending, confirmed sale | per-conversation boolean P/R/F1 |
 | False confirmed-sale rate | conversations with `confirmed_sale: true` predicted ÷ conversations labelled not a sale |
+| Sale recall | correctly confirmed sales ÷ conversations labelled a sale |
+| Review rate | conversations with `review_required` ÷ all. This includes the routine "dates unresolved, no reference date" warning, so it is not the same as abstaining. |
+| Sale abstention rate | conversations whose deal state is a needs-a-human state (`possible_acceptance`, `*_needs_review`) ÷ all |
+| Action case accuracy (action scenarios) | scenarios where the sale decision matches, every required action is proposed, no forbidden action is proposed, **and** the still-open obligations match exactly ÷ all (gate ≥ 0.90, and 0 false sales) |
 
 ### Results
 
@@ -498,9 +538,22 @@ These were measured locally on Python 3.13.16 and are reproduced by CI. Current 
 | Confirmed sale F1 | 1.000 (6 pos.) | 1.000 (6) | 1.000 (7) | 1.000 (7) | 1.000 (5) |
 | False confirmed-sale rate (< 3%) | 0 / 40 | 0 / 29 | 0 / 19 | 0 / 13 | 0 / 15 |
 
-The v0.1.1 and v0.1.2 changes left the earlier splits' scores byte-identical. The benchmark only scores labels, money, dates and booleans.
-It does **not** gate opportunity eligibility, commitment fulfilment, deferral handling, date-year resolution or derived-node invariants.
-Those are covered by regression tests (`tests/test_v012_semantics.py`) and the reviewer's 28-check script, which passes 28/28 on v0.1.2 (9/28 on v0.1.1).
+Sale decisions per set (v0.1.3):
+
+| Set | False sales | Sale recall | Review rate | Sale abstention |
+| --- | --- | --- | --- | --- |
+| dev (46) | 0 / 40 | 6 / 6 | 0.261 | 0.000 |
+| holdout (35) | 0 / 29 | 6 / 6 | 0.457 | 0.029 |
+| holdout2 (26) | 0 / 19 | 7 / 7 | 0.462 | 0.038 |
+| holdout3 (20) | 0 / 13 | 7 / 7 | 0.400 | 0.150 |
+| holdout4 (20) | 0 / 15 | 5 / 5 | 0.250 | 0.050 |
+| action scenarios (24) | 0 / 19 | 5 / 5 | 0.458 | 0.042 |
+
+Action scenarios (v0.1.3): action case accuracy **1.000**; required-action recall 1.000; forbidden actions proposed 0; open-obligation exact match 1.000.
+
+Each release from v0.1.1 to v0.1.3 left the earlier splits' label scores byte-identical. v0.1.3 also changed no proposed action or deal state on the 147 earlier label cases.
+The label benchmark only scores labels, money, dates and booleans. Action correctness is measured by the action-scenario set.
+The remaining semantics (eligibility, fulfilment, deferral, event status) are covered by regression tests (`tests/test_v012_semantics.py`, `tests/test_v013_events.py`) and by the 28-check script from the v0.1.1 review, which passes 28/28.
 
 **These current numbers are not blind.** The rules were changed after studying the errors on every holdout. The more honest estimate is the **first run on each holdout, before any fix it informed** ([`data/blind_first_runs.json`](data/blind_first_runs.json)):
 
@@ -511,19 +564,35 @@ Those are covered by regression tests (`tests/test_v012_semantics.py`) and the r
 | holdout3 (v0.1.1 after the review fixes) | **0.857** | 1.000 | 1.000 | 0.800 | 0.727 | 0 / 13 |
 | holdout4 (v0.1.2 after the expanded-review fixes) | **0.667** (4 events) | 1.000 | 1.000 | 1.000 | 0.750 | 0 / 15 |
 
+The first run of the action scenarios (v0.1.3, before any scenario-informed change) gave:
+- action case accuracy **0.958** (23/24);
+- open obligations 0.958, sale recall 5/5, false sales 0/19.
+
+The one miss: a deposit's stated remainder was tracked as a generic payment.
+
 On each first run, at least one metric **missed its target** on phrasing the rules hadn't seen. Expect similar drops on real chats.
 On holdout3 and holdout4, every miss was on the cautious side: real sales not confirmed, or appointment commitments missed. None were false sales.
 
-Across all five sets, 0 false confirmed sales were found in 116 negative conversations.
-Under IID random sampling, the exact one-sided 95% upper bound would be about 2.6% (rule of three: 2.59%).
+Across all six sets, 0 false confirmed sales were found in 135 negative conversations.
+Under IID random sampling, the exact one-sided 95% upper bound would be about 2.2% (rule of three: 2.22%).
 Those assumptions **do not hold**: the cases were hand-picked, most sets were used for tuning, and all are synthetic. So this **does not demonstrate the < 3% target**.
-Independent reviews also found false sales outside these sets: four in v0.1 (fixed in v0.1.1) and two more in v0.1.1 (fixed in v0.1.2).
+Independent reviews also found false sales outside these sets:
+- four in v0.1, fixed in v0.1.1;
+- two more in v0.1.1, fixed in v0.1.2;
+- one more pattern in v0.1.2 (plain information statements), fixed in v0.1.3.
+
+Each round of review found something the sets did not cover. Treat the sets as development coverage, and see [PILOT_EVALUATION_PLAN.md](PILOT_EVALUATION_PLAN.md) for how real-world reliability should be measured.
 
 **Human-rated next-action usefulness (target ≥ 80%) has not been measured.** It is `null` in every report, and no claim is made about it.
 
 ## Limitations
 
 - **Synthetic, small, and Thai-rule-specific.** Small samples (5–12 commitment events per set). The real-world accuracy is unknown.
+- **The event layer is small and heuristic.**
+  - Clause splitting relies on spaces and a few conjunctions.
+  - A delivery split across two messages (`ส่งใบเสนอราคา` / `ให้แล้วนะครับ`) is not recognised as a delivery (conservative).
+  - A deferral that doesn't name its object (`ไว้ค่อยส่งทีหลัง`) is not recorded.
+  - A rescheduled quotation delivery (`ขอเลื่อนวันส่งใบเสนอราคาเป็นวันศุกร์`) keeps the installation correctly, but the `send_quotation` proposal does not carry the new date.
 - **Semantics are still rule-based.**
   - v0.1.2 adds explicit checks for *what* is accepted, rejected, rescheduled, completed or priced, and *whether* it is asserted, conditional, deferred or reported.
   - These checks are still Thai patterns, not a parser, so new phrasing can slip past them. The 28-check review script and holdout4 found adjacent cases after each fix.
@@ -572,7 +641,7 @@ Independent reviews also found false sales outside these sets: four in v0.1 (fix
 4. Update this README and `data/benchmark_results.json` (`python evaluate.py --output data/benchmark_results.json`) when behavior changes.
 5. Out of scope for the core: UI, CRM, chat integrations, auth, invoices, payments, databases, billing, autonomous replies.
 
-See [SELF_AUDIT.md](SELF_AUDIT.md) for the audit log and the recommended v0.2 work.
+See [SELF_AUDIT.md](SELF_AUDIT.md) for the audit log, and [PILOT_EVALUATION_PLAN.md](PILOT_EVALUATION_PLAN.md) for the real-world evaluation plan.
 
 ## License
 

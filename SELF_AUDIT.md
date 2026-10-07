@@ -1,5 +1,105 @@
 # Chat2Work Core: self-audit
 
+## v0.1.3 event-classification patch (2026-10-07)
+
+### Starting point
+
+- **Baseline:** v0.1.2 at `3ae8778` (427 tests, CI green, 28/28 on the v0.1.1 reviewer script). HEAD equalled the remote; there was no newer work, no other branch and no repository instructions.
+- **Input:** nine problem groups from a new independent review.
+- **Missing script:** the brief mentions a **new 32-check reviewer script, but it was not supplied**. Only the earlier 28-check script is available, and it was run.
+
+### Method
+
+1. **Reproduce.** Reproduced all nine groups on v0.1.2 (see the before/after table).
+2. **Tests first.** Wrote `tests/test_v013_events.py` before changing behavior, as regression families with natural variants and positive controls:
+   - pronouns, courtesy, informal endings;
+   - clause order, split and merged messages;
+   - negation, conditions, reported speech.
+
+   On v0.1.2, **48 of its 93 behavioral tests failed**. The 9 semantic-layer unit tests could not run, because the layer did not exist yet.
+3. **Semantic layer.** Added `chat2work/extractors/semantics.py`:
+   - a clause splitter;
+   - a clause classifier, returning asserted / negated / conditional / future / questioned / reported / uncertain;
+   - a target classifier, returning purchase / document / information / payment / appointment.
+
+   Every affected decision now classifies the event first: refusals, cancellations, deliveries, receipts, payment reports, completions, reschedules and negotiation. No exact-string blacklist was added.
+4. **Action scenarios.** Added `data/action_scenarios.jsonl` (24 scenarios), with labels frozen (SHA-256 `b31df0fb…`) before the first run. A new scorer, `evaluate_actions`, checks:
+   - the sale decision;
+   - required actions;
+   - forbidden actions;
+   - the exact set of still-open obligations.
+
+   Recorded the first run, then fixed only what it showed.
+5. **Probes.** Ran natural-variant probes and fixed the general gaps they exposed.
+6. **Verification.**
+   - Diffed proposed actions and deal states on the 147 earlier label cases against v0.1.2: **0 changed**.
+   - Re-checked evidence, IDs, references, confidence and approval invariants on all 171 conversations (349 actions).
+
+### The nine groups: before and after
+
+| # | Reproduction (summary) | v0.1.2 | v0.1.3 |
+| --- | --- | --- | --- |
+| 1 | `ส่งแคตตาล็อกให้ครับ` / `ส่งรูปให้ครับ` → `เอาครับ` | confirmed sale | `information_accepted` and `send_offered_information`; never a sale |
+| 2 | after a sale: `ผมไม่ซื้อครับ`, `ขอโทษครับ ไม่จ้างครับ`, `ไม่ซื้อครับ ขอบคุณที่ส่งรูปมาแล้วนะครับ` | sale stayed confirmed | `declined`; acceptance kept as history. Refusals are read per clause after courtesy and pronouns; an unrelated `แล้ว` no longer suppresses them. |
+| 3 | PDF request → `ถ้าส่งใบเสนอราคาแล้วจะโทรแจ้ง`, `พรุ่งนี้จะส่งใบเสนอราคา แล้วโทรแจ้ง`, `ส่งใบเสนอราคาแล้วใช่ไหม`, `ถ้าได้รับใบเสนอราคาแล้วจะ…` | request closed in all four | request stays open with `send_quotation`. Only an asserted, completed delivery or receipt closes it. |
+| 4 | `เดี๋ยวพรุ่งนี้ส่งใบเสนอราคาให้` → `เอาครับ แต่ยังไม่ต้องส่ง`; deferral inside the request; later go-ahead | `send_quotation` **and** `await_customer_go_ahead` together; in-request deferral ignored; go-ahead did not reopen | the promise is on hold: only `await_customer_go_ahead`, with the promise as evidence. In-request deferral is honoured. A go-ahead reopens `send_offered_information` / `send_quotation`. |
+| 5 | `ถ้าโอนแล้วจะส่งสลิปให้`; `โอนแล้ว 1000 บาท ที่เหลืออีก 4000 จะโอนพรุ่งนี้` | conditional counted as a payment report; partial payment closed everything | no report for the conditional. The partial payment records `reported_amount: 1000`; the remainder becomes an open commitment (4,000, `remaining_balance`, deadline `พรุ่งนี้`). A partial report without a remainder keeps the original open, with a warning. |
+| 6 | `ขอเลื่อนส่งรูป…`, `ขอเลื่อนวันที่โอนมัดจำ…`, `ขอเลื่อนวันส่งใบเสนอราคา…` | installation superseded in all three | installation untouched; `deliverable_reschedule_request` or `payment_reschedule_request` |
+| 7 | `ราคารวม 18500` → `ลดให้เหลือ 17000`; `ราคา 18500` → `รวมค่าแรงไว้แล้ว 1500` | opportunity 18,500 (net price missed); then **1,500** | opportunity 17,000 (revised net price); then 18,500 (labour is `included_component`) |
+| 8 | `ติดตั้งเสร็จแล้วมั้งครับ` | completion closed tracking | `completion_uncertain`: tracking kept, plus `verify_completion` |
+| 9 | after a sale: `ยกเลิกใบเสนอราคาครับ แต่ยังซื้อสินค้าเหมือนเดิม` | **deal cancelled** | quotation request withdrawn (`quotation_declined`); sale kept |
+
+### Extra defects found during verification (fixed, with tests)
+
+- **Clause splitting broke phrases.** `แนบไฟล์ใบเสนอราคา PDF ให้แล้ว` split at spaces and lost the delivery. Latin words, numbers and particles now continue the clause. This also fixed one holdout4 regression it had caused.
+- **Polite reschedule requests were dropped.** `…เลื่อนเป็นวันศุกร์ได้ไหม` is a request, not a question.
+- **`แต่ถ้า…` conditions were missed.** They now govern the next clause.
+- **Hypothetical haggling revoked a sale.** `ถ้าแพงกว่านี้ผมไม่ซื้อ` revoked the sale through the negotiation rule. Hypothetical negotiation no longer counts.
+- **Action scenarios, first run.** A deposit's remainder was tracked as a generic payment; remainders now inherit the purpose.
+- **Informal and colloquial forms.**
+  - `เอาจ้า` / `เอาคับ` were missed as acceptance.
+  - Colloquial `ละ` (`โอนละนะคะ`, `เสร็จละครับ`) now marks completion.
+  - `หากโอนเรียบร้อยแล้วจะแจ้งอีกที` was misread as decision pending.
+  - A `ขอบคุณ` (thanks) reply now answers an information offer.
+
+### Results (local, Python 3.13.16)
+
+- **Tests:** `python -m pytest -q` → **538 passed** (427 in v0.1.2).
+- **Benchmark:** `python evaluate.py --check` → exit 0 on the five label splits plus the action-scenario gate. Label scores are byte-identical to v0.1.2.
+- **Reviewer script:** 28-check script from the v0.1.1 review: **28/28**. The 32-check script was **not run**, because it was not supplied.
+- **Action scenarios:**
+
+  | Run | Case accuracy | Open obligations | Sale recall | False sales | Review rate | Sale abstention |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | first run, before fixes | 0.958 (23/24) | 0.958 | 5/5 | 0/19 | 0.458 | 0.042 |
+  | now | 1.000 | 1.000 | 5/5 | 0/19 | — | — |
+
+  The review rate is mostly the routine "no reference date" warning; sale abstention is the share of cases left for a human to decide.
+- **Sale decisions, all six sets:** 0 false sales in 135 non-sale conversations and full sale recall. The review and abstention rates per set are in the README. With IID sampling the one-sided bound would be about 2.2%, but the sets are hand-written and mostly tuned, so **this is not real-world evidence**.
+- **Usefulness:** human usefulness is **not measured**.
+
+### Remaining weaknesses
+
+- **Small heuristic event layer.**
+  - Clause splitting depends on spaces and a few conjunctions.
+  - A delivery split across messages is not recognised.
+  - A deferral without a named object (`ไว้ค่อยส่งทีหลัง`) is not recorded.
+  - A rescheduled quotation delivery leaves `send_quotation` without the new date.
+- **Payments.** Partial-payment arithmetic only uses amounts stated in the same message, and nothing is bank-verified.
+- **Inherited.** Thai patterns, not a parser; one deal and one appointment slot per conversation; synthetic data only; uncalibrated confidence.
+
+### Recommended next step
+
+Execute [PILOT_EVALUATION_PLAN.md](PILOT_EVALUATION_PLAN.md):
+- consented, anonymised real conversations;
+- development and evaluation sets split by business and frozen before use;
+- double human labels with adjudication;
+- usefulness ratings by the businesses themselves.
+
+Until then, no claim of real-world reliability or production readiness.
+
+---
+
 ## v0.1.2 semantic patch (2026-10-07)
 
 ### Starting point

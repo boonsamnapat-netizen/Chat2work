@@ -3,6 +3,7 @@ import math
 import re
 from dataclasses import replace
 from datetime import date
+from decimal import Decimal
 from .models import Action, Analysis, Evidence, Extractor, Message, Opportunity, Signal
 from .parsing import parse_conversation
 from .extractors import RuleExtractor
@@ -236,11 +237,17 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
             closers = prices_given if s.metadata.get("deliverable") == "price" else documents
             return not _after(s, closers + declined)
 
-        open_quotes = [s for s in by_type.get("business_commitment", []) if s.value == "send_quotation" and quote_open(s)]
+        promises = [s for s in by_type.get("business_commitment", []) if s.value == "send_quotation" and quote_open(s)]
         requests = [s for s in by_type.get("quotation_request", []) if quote_open(s)]
-        open_requests = [s for s in requests if not s.metadata.get("deferred")]
-        deferred = [s for s in requests if s.metadata.get("deferred")
-                    and not any(r.evidence.message_id > s.evidence.message_id for r in open_requests)]
+        # A deferral ("เอาครับ แต่ยังไม่ต้องส่ง") puts the quotation on hold until a later go-ahead
+        # (a new, non-deferred request). The promise and request stay as evidence of the obligation.
+        quote_holds = [s for s in requests if s.metadata.get("deferred")]
+        go_aheads = [s for s in requests if not s.metadata.get("deferred")]
+        last_hold = max((s.evidence.message_id for s in quote_holds), default=-1)
+        on_hold = last_hold >= 0 and max((s.evidence.message_id for s in go_aheads), default=-1) < last_hold
+        held = sorted(promises + quote_holds, key=lambda s: s.evidence.message_id) if on_hold else []
+        open_quotes = [] if on_hold else promises
+        open_requests = [] if on_hold else [s for s in go_aheads if s.evidence.message_id >= last_hold]
         if open_quotes:
             propose("send_quotation", "จัดเตรียมและส่งใบเสนอราคาที่รับปากไว้",
                     sorted(open_quotes + open_requests, key=lambda s: s.evidence.message_id))
@@ -250,28 +257,52 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
         propose("answer_price_enquiry", "ตอบราคาที่ลูกค้าสอบถาม โดยตรวจสอบราคาก่อนส่ง",
                 [s for s in by_type.get("price_enquiry", []) if not _after(s, priced)])
         offers = {s.evidence.message_id: s for s in by_type.get("information_offer", [])}
-        info_sent = by_type.get("information_sent", [])
+        info_closed = by_type.get("information_sent", []) + by_type.get("information_declined", [])
+        info_requests = [s for s in by_type.get("information_requested", []) if not _after(s, info_closed)]
+        released: set[str] = set()
         for accepted_info in by_type.get("information_accepted", []):
-            if accepted_info.value == "quotation" or _after(accepted_info, info_sent):
+            if accepted_info.value == "quotation" or _after(accepted_info, info_closed):
                 continue
             offer_signal = offers.get(accepted_info.metadata.get("offer_message_id"))
-            sources = [x for x in (offer_signal, accepted_info) if x is not None]
-            if accepted_info.metadata.get("deferred"):
-                deferred.append(accepted_info)
+            go = [r for r in info_requests if r.value == accepted_info.value and r.evidence.message_id > accepted_info.evidence.message_id]
+            sources = [x for x in (offer_signal, accepted_info) if x is not None] + go
+            released.update(r.id for r in go)
+            if accepted_info.metadata.get("deferred") and not go:
+                held.append(accepted_info)
             else:
                 propose("send_offered_information", f"ส่งข้อมูลที่ลูกค้าตอบรับ ({accepted_info.value}); ไม่ใช่การยืนยันการซื้อ", sources)
-        # "เอาครับ แต่ยังไม่ต้องส่ง": keep the interest, honour the timing constraint.
+        for request in info_requests:
+            if request.id not in released:
+                propose("send_offered_information", f"ลูกค้าขอข้อมูล ({request.value}); ไม่ใช่การยืนยันการซื้อ", [request])
+        # Keep the interest and the obligation, honour the timing constraint: no send-now proposal.
         propose("await_customer_go_ahead", "ลูกค้าสนใจแต่ขอให้ยังไม่ส่ง: รอให้ลูกค้าแจ้งก่อนจึงส่ง",
-                sorted(deferred, key=lambda s: s.evidence.message_id))
+                sorted(held, key=lambda s: s.evidence.message_id))
         propose("confirm_payment_schedule", "ยืนยันกำหนดชำระเงินใหม่กับลูกค้า (ไม่เปลี่ยนนัดหมายงาน)",
                 by_type.get("payment_reschedule_request", []))
+        propose("verify_completion", "ยังไม่ชัดว่างานเสร็จแล้ว: ตรวจสอบกับช่าง/ลูกค้าก่อนปิดงาน",
+                [s for s in by_type.get("completion_uncertain", []) if not _after(s, completed)])
         payments_reported = by_type.get("payment_reported", [])
+        remainders = [s for s in by_type.get("customer_commitment", []) if s.metadata.get("purpose") == "remaining_balance"]
+        partial_payment = []
+
+        def payment_open(c: Signal) -> bool:
+            later = [r for r in payments_reported if r.evidence.message_id > c.evidence.message_id]
+            if not later:
+                return True
+            if any(r.evidence.message_id > c.evidence.message_id for r in remainders):
+                return False  # superseded by the evidenced remaining-balance commitment
+            reported = [r.metadata.get("reported_amount") for r in later]
+            if c.metadata.get("amount") and all(reported):
+                if sum(Decimal(x) for x in reported) < Decimal(c.metadata["amount"]):
+                    partial_payment.append(c)
+                    return True
+            return False
 
         def is_open(c: Signal) -> bool:
             if c.value == "send_quotation":
                 return c in open_quotes
             if c.value in PAYMENT_COMMITMENTS:
-                return not _after(c, payments_reported)
+                return payment_open(c)
             if c.value in APPOINTMENT_COMMITMENTS:
                 return _live(c) and not _after(c, completed)
             return True
@@ -305,6 +336,8 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
         warnings.append("later_price_relation_unclear; kept_earlier_explicit_total_for_review")
     if by_type.get("payment_reported"):
         warnings.append("payment_reported_not_verified")
+    if not inactive and partial_payment:
+        warnings.append("partial_payment_reported; remaining_amount_unconfirmed")
     if state in {"possible_acceptance", "changed_needs_review", "cancellation_needs_review"}:
         warnings.append(f"deal_status_{state}")
     review = bool(warnings) or any(s.confidence < 0.80 for s in signals)

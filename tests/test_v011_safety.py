@@ -230,7 +230,7 @@ def test_failing_metric_still_fails_check(tmp_path):
 def test_existing_datasets_pass_check(tmp_path):
     proc = run_evaluate("--check")
     assert proc.returncode == 0, proc.stderr
-    assert len(json.loads(proc.stdout)) == 5
+    assert len(json.loads(proc.stdout)) == 6
 
 
 # --- 5. rescheduled appointment must not reuse the old time ------------------
