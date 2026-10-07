@@ -1,0 +1,41 @@
+name: Core tests and synthetic benchmark
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: python -m pip install -e '.[dev]'
+      - name: Tests
+        run: python -m pytest -q
+      - name: Synthetic benchmark (fails if a technical gate is unmet)
+        run: python evaluate.py --check --output benchmark-run.json > /dev/null
+      - name: Sample analysis
+        run: |
+          chat2work data/example_conversation.txt > example-analysis-run.json
+          chat2work data/example_conversation.txt --reference-date 2026-10-07 > example-analysis-with-reference-date.json
+          printf 'ลูกค้า: สนใจครับ\nร้าน: ราคา 18,500 บาท\nลูกค้า: ขอคิดดูก่อน\n' | python -m chat2work --compact
+          python -c "import json; d = json.load(open('example-analysis-run.json', encoding='utf-8')); assert not d['confirmed_sale'] and d['potential_revenue']['amount'] == '43000'"
+          python -c "import json; [print(r['dataset'], {k: v['f1'] for k, v in r['metrics'].items()}, 'false sales', r['false_confirmed_sales'], '/', r['negative_sale_cases']) for r in json.load(open('benchmark-run.json', encoding='utf-8'))]"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-benchmark-python-${{ matrix.python }}
+          path: |
+            benchmark-run.json
+            example-analysis-run.json
+            example-analysis-with-reference-date.json

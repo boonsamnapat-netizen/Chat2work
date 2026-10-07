@@ -1,0 +1,397 @@
+{
+  "schema_version": "0.1",
+  "provider": "thai_rules_v0.1",
+  "reference_date": null,
+  "messages": [
+    {
+      "id": 0,
+      "speaker": "ลูกค้า",
+      "actor": "customer",
+      "text": "สนใจแอร์ Mitsubishi 18000 BTU 2 เครื่องครับ",
+      "raw_line": "ลูกค้า: สนใจแอร์ Mitsubishi 18000 BTU 2 เครื่องครับ"
+    },
+    {
+      "id": 1,
+      "speaker": "ร้าน",
+      "actor": "business",
+      "text": "ราคา 43,000 บาทรวมติดตั้ง",
+      "raw_line": "ร้าน: ราคา 43,000 บาทรวมติดตั้ง"
+    },
+    {
+      "id": 2,
+      "speaker": "ลูกค้า",
+      "actor": "customer",
+      "text": "ถ้าได้อยากติดวันเสาร์",
+      "raw_line": "ลูกค้า: ถ้าได้อยากติดวันเสาร์"
+    },
+    {
+      "id": 3,
+      "speaker": "ร้าน",
+      "actor": "business",
+      "text": "ได้ครับ เดี๋ยวล็อกคิวไว้ให้",
+      "raw_line": "ร้าน: ได้ครับ เดี๋ยวล็อกคิวไว้ให้"
+    }
+  ],
+  "signals": [
+    {
+      "id": "s1",
+      "type": "commercial_intent",
+      "actor": "customer",
+      "value": "commercial_discussion",
+      "confidence": 0.9,
+      "evidence": {
+        "message_id": 0,
+        "speaker": "ลูกค้า",
+        "text": "สนใจแอร์ Mitsubishi 18000 BTU 2 เครื่องครับ",
+        "raw_line": "ลูกค้า: สนใจแอร์ Mitsubishi 18000 BTU 2 เครื่องครับ"
+      },
+      "metadata": {},
+      "confidence_level": "high"
+    },
+    {
+      "id": "s2",
+      "type": "customer_interest",
+      "actor": "customer",
+      "value": "interested",
+      "confidence": 0.94,
+      "evidence": {
+        "message_id": 0,
+        "speaker": "ลูกค้า",
+        "text": "สนใจแอร์ Mitsubishi 18000 BTU 2 เครื่องครับ",
+        "raw_line": "ลูกค้า: สนใจแอร์ Mitsubishi 18000 BTU 2 เครื่องครับ"
+      },
+      "metadata": {},
+      "confidence_level": "high"
+    },
+    {
+      "id": "s3",
+      "type": "commercial_intent",
+      "actor": "business",
+      "value": "commercial_discussion",
+      "confidence": 0.9,
+      "evidence": {
+        "message_id": 1,
+        "speaker": "ร้าน",
+        "text": "ราคา 43,000 บาทรวมติดตั้ง",
+        "raw_line": "ร้าน: ราคา 43,000 บาทรวมติดตั้ง"
+      },
+      "metadata": {},
+      "confidence_level": "high"
+    },
+    {
+      "id": "s4",
+      "type": "monetary_amount",
+      "actor": "business",
+      "value": {
+        "amount": "43000",
+        "currency": "THB",
+        "role": "price",
+        "raw": "43,000"
+      },
+      "confidence": 0.96,
+      "evidence": {
+        "message_id": 1,
+        "speaker": "ร้าน",
+        "text": "ราคา 43,000 บาทรวมติดตั้ง",
+        "raw_line": "ร้าน: ราคา 43,000 บาทรวมติดตั้ง"
+      },
+      "metadata": {},
+      "confidence_level": "high"
+    },
+    {
+      "id": "s5",
+      "type": "customer_interest",
+      "actor": "customer",
+      "value": "interested",
+      "confidence": 0.94,
+      "evidence": {
+        "message_id": 2,
+        "speaker": "ลูกค้า",
+        "text": "ถ้าได้อยากติดวันเสาร์",
+        "raw_line": "ลูกค้า: ถ้าได้อยากติดวันเสาร์"
+      },
+      "metadata": {},
+      "confidence_level": "high"
+    },
+    {
+      "id": "s6",
+      "type": "appointment",
+      "actor": "customer",
+      "value": "schedule_discussion",
+      "confidence": 0.88,
+      "evidence": {
+        "message_id": 2,
+        "speaker": "ลูกค้า",
+        "text": "ถ้าได้อยากติดวันเสาร์",
+        "raw_line": "ลูกค้า: ถ้าได้อยากติดวันเสาร์"
+      },
+      "metadata": {},
+      "confidence_level": "medium"
+    },
+    {
+      "id": "s7",
+      "type": "schedule",
+      "actor": "customer",
+      "value": {
+        "raw": "วันเสาร์",
+        "kind": "date",
+        "resolved_date": null,
+        "resolution": "no_reference_date"
+      },
+      "confidence": 0.91,
+      "evidence": {
+        "message_id": 2,
+        "speaker": "ลูกค้า",
+        "text": "ถ้าได้อยากติดวันเสาร์",
+        "raw_line": "ลูกค้า: ถ้าได้อยากติดวันเสาร์"
+      },
+      "metadata": {},
+      "confidence_level": "high"
+    },
+    {
+      "id": "s8",
+      "type": "appointment",
+      "actor": "business",
+      "value": "schedule_discussion",
+      "confidence": 0.93,
+      "evidence": {
+        "message_id": 3,
+        "speaker": "ร้าน",
+        "text": "ได้ครับ เดี๋ยวล็อกคิวไว้ให้",
+        "raw_line": "ร้าน: ได้ครับ เดี๋ยวล็อกคิวไว้ให้"
+      },
+      "metadata": {},
+      "confidence_level": "high"
+    },
+    {
+      "id": "s9",
+      "type": "business_commitment",
+      "actor": "business",
+      "value": "reserve_or_attend_appointment",
+      "confidence": 0.93,
+      "evidence": {
+        "message_id": 3,
+        "speaker": "ร้าน",
+        "text": "ได้ครับ เดี๋ยวล็อกคิวไว้ให้",
+        "raw_line": "ร้าน: ได้ครับ เดี๋ยวล็อกคิวไว้ให้"
+      },
+      "metadata": {},
+      "confidence_level": "high"
+    },
+    {
+      "id": "s10",
+      "type": "missing_information",
+      "actor": "customer",
+      "value": "installation_address",
+      "confidence": 0.84,
+      "evidence": {
+        "message_id": 2,
+        "speaker": "ลูกค้า",
+        "text": "ถ้าได้อยากติดวันเสาร์",
+        "raw_line": "ลูกค้า: ถ้าได้อยากติดวันเสาร์"
+      },
+      "metadata": {
+        "derived_from": [
+          "s6"
+        ],
+        "reason": "needed_for_onsite_schedule; not_found_in_supplied_messages"
+      },
+      "confidence_level": "medium"
+    },
+    {
+      "id": "s11",
+      "type": "missing_information",
+      "actor": "customer",
+      "value": "appointment_time",
+      "confidence": 0.84,
+      "evidence": {
+        "message_id": 2,
+        "speaker": "ลูกค้า",
+        "text": "ถ้าได้อยากติดวันเสาร์",
+        "raw_line": "ลูกค้า: ถ้าได้อยากติดวันเสาร์"
+      },
+      "metadata": {
+        "derived_from": [
+          "s6"
+        ],
+        "reason": "needed_for_onsite_schedule; not_found_in_supplied_messages"
+      },
+      "confidence_level": "medium"
+    }
+  ],
+  "commercial_intent": true,
+  "customer_interest": true,
+  "decision_pending": false,
+  "confirmed_sale": false,
+  "deal_status": "interested",
+  "status_signal_ids": [
+    "s5"
+  ],
+  "potential_revenue": {
+    "amount": "43000",
+    "currency": "THB",
+    "signal_ids": [
+      "s4"
+    ],
+    "confidence": 0.96,
+    "reason": "explicit_business_price; potential_only_not_booked_revenue"
+  },
+  "missing_information": [
+    {
+      "id": "s10",
+      "type": "missing_information",
+      "actor": "customer",
+      "value": "installation_address",
+      "confidence": 0.84,
+      "evidence": {
+        "message_id": 2,
+        "speaker": "ลูกค้า",
+        "text": "ถ้าได้อยากติดวันเสาร์",
+        "raw_line": "ลูกค้า: ถ้าได้อยากติดวันเสาร์"
+      },
+      "metadata": {
+        "derived_from": [
+          "s6"
+        ],
+        "reason": "needed_for_onsite_schedule; not_found_in_supplied_messages"
+      },
+      "confidence_level": "medium"
+    },
+    {
+      "id": "s11",
+      "type": "missing_information",
+      "actor": "customer",
+      "value": "appointment_time",
+      "confidence": 0.84,
+      "evidence": {
+        "message_id": 2,
+        "speaker": "ลูกค้า",
+        "text": "ถ้าได้อยากติดวันเสาร์",
+        "raw_line": "ลูกค้า: ถ้าได้อยากติดวันเสาร์"
+      },
+      "metadata": {
+        "derived_from": [
+          "s6"
+        ],
+        "reason": "needed_for_onsite_schedule; not_found_in_supplied_messages"
+      },
+      "confidence_level": "medium"
+    }
+  ],
+  "recommended_actions": [
+    {
+      "type": "track_commitment",
+      "description": "ตรวจติดตามสิ่งที่รับปากไว้ โดยยืนยันกับผู้รับผิดชอบก่อนดำเนินการ",
+      "signal_ids": [
+        "s9"
+      ],
+      "evidence": [
+        {
+          "message_id": 3,
+          "speaker": "ร้าน",
+          "text": "ได้ครับ เดี๋ยวล็อกคิวไว้ให้",
+          "raw_line": "ร้าน: ได้ครับ เดี๋ยวล็อกคิวไว้ให้"
+        }
+      ],
+      "confidence": 0.93,
+      "approval_status": "proposed",
+      "requires_human_approval": true,
+      "confidence_level": "high"
+    },
+    {
+      "type": "confirm_appointment",
+      "description": "ยืนยันวัน เวลา และสถานที่นัดกับลูกค้า",
+      "signal_ids": [
+        "s6",
+        "s8"
+      ],
+      "evidence": [
+        {
+          "message_id": 2,
+          "speaker": "ลูกค้า",
+          "text": "ถ้าได้อยากติดวันเสาร์",
+          "raw_line": "ลูกค้า: ถ้าได้อยากติดวันเสาร์"
+        },
+        {
+          "message_id": 3,
+          "speaker": "ร้าน",
+          "text": "ได้ครับ เดี๋ยวล็อกคิวไว้ให้",
+          "raw_line": "ร้าน: ได้ครับ เดี๋ยวล็อกคิวไว้ให้"
+        }
+      ],
+      "confidence": 0.88,
+      "approval_status": "proposed",
+      "requires_human_approval": true,
+      "confidence_level": "medium"
+    },
+    {
+      "type": "request_missing_information",
+      "description": "ขอข้อมูลที่ยังไม่พบในบทสนทนา: installation_address, appointment_time",
+      "signal_ids": [
+        "s10",
+        "s11"
+      ],
+      "evidence": [
+        {
+          "message_id": 2,
+          "speaker": "ลูกค้า",
+          "text": "ถ้าได้อยากติดวันเสาร์",
+          "raw_line": "ลูกค้า: ถ้าได้อยากติดวันเสาร์"
+        }
+      ],
+      "confidence": 0.84,
+      "approval_status": "proposed",
+      "requires_human_approval": true,
+      "confidence_level": "medium"
+    },
+    {
+      "type": "follow_up_customer",
+      "description": "สอบถามการตัดสินใจของลูกค้า โดยเคารพคำขอคิดก่อน",
+      "signal_ids": [
+        "s2",
+        "s5"
+      ],
+      "evidence": [
+        {
+          "message_id": 0,
+          "speaker": "ลูกค้า",
+          "text": "สนใจแอร์ Mitsubishi 18000 BTU 2 เครื่องครับ",
+          "raw_line": "ลูกค้า: สนใจแอร์ Mitsubishi 18000 BTU 2 เครื่องครับ"
+        },
+        {
+          "message_id": 2,
+          "speaker": "ลูกค้า",
+          "text": "ถ้าได้อยากติดวันเสาร์",
+          "raw_line": "ลูกค้า: ถ้าได้อยากติดวันเสาร์"
+        }
+      ],
+      "confidence": 0.94,
+      "approval_status": "proposed",
+      "requires_human_approval": true,
+      "confidence_level": "high"
+    },
+    {
+      "type": "add_to_revenue_radar",
+      "description": "ติดตามโอกาสรายได้และสถานะถัดไป; ยังไม่ใช่รายได้ที่รับรู้",
+      "signal_ids": [
+        "s4"
+      ],
+      "evidence": [
+        {
+          "message_id": 1,
+          "speaker": "ร้าน",
+          "text": "ราคา 43,000 บาทรวมติดตั้ง",
+          "raw_line": "ร้าน: ราคา 43,000 บาทรวมติดตั้ง"
+        }
+      ],
+      "confidence": 0.96,
+      "approval_status": "proposed",
+      "requires_human_approval": true,
+      "confidence_level": "high"
+    }
+  ],
+  "review_required": true,
+  "warnings": [
+    "dates_are_unresolved; no_reference_date_supplied"
+  ]
+}

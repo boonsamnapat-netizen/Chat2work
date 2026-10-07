@@ -1,0 +1,158 @@
+{
+  "note": "First runs on each holdout, recorded before any rule change informed by that holdout. After these runs both holdouts were used for error analysis, so later scores on them are NOT blind. Synthetic data only.",
+  "holdout.jsonl": {
+    "engine": "unmodified v0.1 candidate from Chat2work-v0.1.zip",
+    "amount_scoring": "values only (role metric not yet implemented)",
+    "cases": 35,
+    "metrics": {
+      "commitments": {
+        "tp": 10,
+        "fp": 0,
+        "fn": 2,
+        "precision": 1.0,
+        "recall": 0.8333333333333334,
+        "f1": 0.9090909090909091
+      },
+      "amounts": {
+        "tp": 34,
+        "fp": 1,
+        "fn": 0,
+        "precision": 0.9714285714285714,
+        "recall": 1.0,
+        "f1": 0.9855072463768116
+      },
+      "dates": {
+        "tp": 16,
+        "fp": 1,
+        "fn": 2,
+        "precision": 0.9411764705882353,
+        "recall": 0.8888888888888888,
+        "f1": 0.9142857142857143
+      },
+      "commercial_intent": {
+        "tp": 33,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "decision_pending": {
+        "tp": 5,
+        "fp": 0,
+        "fn": 3,
+        "precision": 1.0,
+        "recall": 0.625,
+        "f1": 0.7692307692307693
+      },
+      "confirmed_sale": {
+        "tp": 4,
+        "fp": 1,
+        "fn": 2,
+        "precision": 0.8,
+        "recall": 0.6666666666666666,
+        "f1": 0.7272727272727273
+      }
+    },
+    "false_confirmed_sales": 1,
+    "negative_sale_cases": 29,
+    "opportunity_amount_accuracy": 0.8571428571428571,
+    "failed_case_ids": [
+      "h_ac_not_interested",
+      "h_ac_catalog_offer",
+      "h_cctv_reschedule",
+      "h_elec_deadline_nomore",
+      "h_elec_time_not_money",
+      "h_elec_noncommercial",
+      "h_contractor_options",
+      "h_contractor_wife",
+      "h_print_qty_unit",
+      "h_print_accept_ok",
+      "h_agency_monthly",
+      "h_solar_survey",
+      "h_interior_thai_date",
+      "h_interior_unknown_speaker",
+      "h_interior_account_request"
+    ]
+  },
+  "holdout2.jsonl": {
+    "engine": "after holdout v1 fixes, before holdout2 fixes",
+    "amount_scoring": "values and roles",
+    "cases": 26,
+    "metrics": {
+      "commitments": {
+        "tp": 4,
+        "fp": 1,
+        "fn": 1,
+        "precision": 0.8,
+        "recall": 0.8,
+        "f1": 0.8
+      },
+      "amounts": {
+        "tp": 27,
+        "fp": 0,
+        "fn": 1,
+        "precision": 1.0,
+        "recall": 0.9642857142857143,
+        "f1": 0.9818181818181818
+      },
+      "amount_roles": {
+        "tp": 25,
+        "fp": 2,
+        "fn": 3,
+        "precision": 0.9259259259259259,
+        "recall": 0.8928571428571429,
+        "f1": 0.9090909090909091
+      },
+      "dates": {
+        "tp": 6,
+        "fp": 0,
+        "fn": 5,
+        "precision": 1.0,
+        "recall": 0.5454545454545454,
+        "f1": 0.7058823529411765
+      },
+      "commercial_intent": {
+        "tp": 24,
+        "fp": 0,
+        "fn": 1,
+        "precision": 1.0,
+        "recall": 0.96,
+        "f1": 0.9795918367346939
+      },
+      "decision_pending": {
+        "tp": 2,
+        "fp": 1,
+        "fn": 3,
+        "precision": 0.6666666666666666,
+        "recall": 0.4,
+        "f1": 0.5
+      },
+      "confirmed_sale": {
+        "tp": 6,
+        "fp": 0,
+        "fn": 1,
+        "precision": 1.0,
+        "recall": 0.8571428571428571,
+        "f1": 0.9230769230769231
+      }
+    },
+    "false_confirmed_sales": 0,
+    "negative_sale_cases": 19,
+    "opportunity_amount_accuracy": 0.9615384615384616,
+    "failed_case_ids": [
+      "h2_ac_move_install",
+      "h2_ac_wait_bonus",
+      "h2_ac_accept_then_deposit",
+      "h2_cctv_compare",
+      "h2_cctv_maybe",
+      "h2_elec_breaker",
+      "h2_elec_survey_address",
+      "h2_repair_reject_price",
+      "h2_contractor_reported_boss",
+      "h2_print_rush",
+      "h2_agency_retainer_accept",
+      "h2_agency_smalltalk"
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chat2work-core"
+version = "0.1.0"
+description = "Thai-first evidence-backed conversation-to-action engine"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10"]
+
+[project.scripts]
+chat2work = "chat2work.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["chat2work*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
