@@ -13,11 +13,17 @@ DATE_TYPES = {"deadline", "schedule", "temporal_mention"}
 CUSTOMER_STATES = {"customer_interest": "interested", "decision_pending": "decision_pending",
                    "customer_acceptance": "accepted", "possible_acceptance": "possible_acceptance",
                    "change_of_mind": "changed_needs_review", "cancellation": "cancelled",
-                   "customer_rejection": "declined", "negotiation": "negotiating"}
+                   "customer_rejection": "declined", "negotiation": "negotiating",
+                   "reported_cancellation": "changed_needs_review"}
 # Within one message the firmer signal wins ("แพงไป ไม่ซ่อมแล้ว" is a cancellation, not negotiation).
-PRIORITY = {"cancellation": 6, "customer_rejection": 5, "change_of_mind": 4, "decision_pending": 3,
+PRIORITY = {"cancellation": 6, "customer_rejection": 5, "change_of_mind": 4, "reported_cancellation": 4, "decision_pending": 3,
             "customer_acceptance": 3, "negotiation": 2, "possible_acceptance": 1, "customer_interest": 0}
 ONSITE = r"ติดตั้ง|อยากติด|มาติด|รวมติด|เข้าหน้างาน|ดูหน้างาน|สำรวจ|เข้าวัด|เข้าซ่อม|มาซ่อม|เดินสาย"
+# An address explicitly withdrawn later ("ที่อยู่เมื่อกี้ผิด") no longer counts as provided.
+ADDRESS_RETRACTED = r"ที่อยู่\S{0,12}(?:ผิด|ไม่ถูก|เปลี่ยน|ใหม่)|(?:เปลี่ยน|แก้)ที่อยู่"
+# Wording that makes a later shop price a revision of an earlier explicit total.
+PRICE_REVISION = r"ราคาใหม่|ลดเหลือ|เหลือ|ปรับ|แก้ราคา|ลดให้|ราคาพิเศษ|เปลี่ยนเป็น|ต่ำสุด|ทั้งหมด|รวม"
+UNKNOWN_CEILING = 0.65
 LOCATION = r"ที่อยู่\s*[:：]\s*\S|ที่อยู่(?:คือ|อยู่)\s*\S|หน้างาน(?:อยู่|ที่)\s*\S|สถานที่(?:คือ|อยู่|:)\s*\S|ซอย\s*\S|ถนน\s*\S|บ้านเลขที่\s*\d|พิกัด\s*[:：]\s*\S|https?://(?:maps\.|maps\.app|goo\.gl/maps)"
 
 
@@ -37,6 +43,18 @@ def _validate(signals: list[Signal], messages: list[Message]) -> None:
             raise ValueError("Unknown speakers require human review")
         if s.type == "customer_acceptance" and (s.actor != "customer" or s.confidence < 0.90):
             raise ValueError("Acceptance requires an explicit customer and high confidence")
+
+
+def _validate_final(signals: list[Signal], actions: list[Action], messages: list[Message]) -> None:
+    """Invariants on the finished output, including nodes the core derived itself."""
+    _validate(signals, messages)
+    ids = {s.id for s in signals}
+    for a in actions:
+        if not a.signal_ids or any(i not in ids for i in a.signal_ids) or not a.requires_human_approval:
+            raise ValueError("Every action must reference existing signals and require human approval")
+    for s in signals:
+        if "derived_from" in s.metadata and s.actor == "unknown" and s.confidence > UNKNOWN_CEILING:
+            raise ValueError("Derived signals from unknown speakers must keep the confidence ceiling")
 
 
 def _resolve_dates(signals: list[Signal], reference: date | None) -> list[Signal]:
@@ -131,6 +149,14 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
     latest_id = max((c.evidence.message_id for c in candidates), default=-1)
     latest = [s for s in candidates if s.evidence.message_id == latest_id]
     latest = [s for s in latest if s.value["role"] == "total"] or latest
+    # A later plain price in a separate bubble ("ค่าแรง 1500 บาท") does not silently replace an earlier
+    # explicit total; only revision wording does. Otherwise keep the total and ask for review.
+    earlier_totals = [s for s in candidates if s.value["role"] == "total" and s.evidence.message_id < latest_id]
+    price_relation_unclear = False
+    if earlier_totals and all(s.value["role"] != "total" for s in latest) and not re.search(PRICE_REVISION, latest[0].evidence.text):
+        newest_total_id = max(s.evidence.message_id for s in earlier_totals)
+        latest = [s for s in earlier_totals if s.evidence.message_id == newest_total_id]
+        price_relation_unclear = True
     unambiguous = len({s.value["amount"] for s in latest}) == 1
     if unambiguous and not inactive and commercial:
         source = latest[-1]
@@ -141,8 +167,19 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
 
     missing: list[Signal] = []
 
+    used_ids = {s.id for s in signals}
+
+    def next_id() -> str:
+        n = len(used_ids) + 1
+        while f"s{n}" in used_ids:
+            n += 1
+        used_ids.add(f"s{n}")
+        return f"s{n}"
+
     def need(field: str, origin: Signal, reason: str) -> None:
-        derived = Signal(f"s{len(signals)+1}", "missing_information", origin.actor, field, 0.84,
+        # A derived node is never more certain than its source, and unknown speakers stay capped.
+        confidence = min(0.84, origin.confidence, UNKNOWN_CEILING if origin.actor == "unknown" else 1.0)
+        derived = Signal(next_id(), "missing_information", origin.actor, field, confidence,
                          origin.evidence, {"derived_from": [origin.id], "reason": reason})
         signals.append(derived)
         missing.append(derived)
@@ -158,7 +195,10 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
     rearranged = active_from >= 0 and _live(reschedules[-1])
     if active_appointments and (onsite or rearranged):
         origin = active_appointments[-1]
-        located = any(re.search(LOCATION, m.text) and not re.search(r"(?:ขอ|ส่ง|แจ้ง|ยืนยัน).*ที่อยู่|ยังไม่|ไม่มี|ไม่ทราบ|สมมติว่า|ตัวอย่าง", m.text) for m in messages)
+        address_ids = [m.id for m in messages if re.search(LOCATION, m.text)
+                       and not re.search(r"(?:ขอ|ส่ง|แจ้ง|ยืนยัน).*ที่อยู่|ยังไม่|ไม่มี|ไม่ทราบ|สมมติว่า|ตัวอย่าง", m.text)]
+        retracted_ids = [m.id for m in messages if re.search(ADDRESS_RETRACTED, m.text) and m.id not in address_ids]
+        located = bool(address_ids) and max(address_ids) > max(retracted_ids, default=-1)
         if onsite and not located:
             need("installation_address", origin, "needed_for_onsite_schedule; not_found_in_supplied_messages")
         # Only times from the active arrangement count; a superseded slot's time is history.
@@ -186,24 +226,45 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
     if not inactive:
         # Closed/reported events are history, not unfulfilled commitments. Each kind of commitment
         # is closed only by evidence about that kind: a payment report cannot prove attendance.
-        delivered = by_type.get("quotation_sent", []) + by_type.get("quotation_received", [])
-        open_quotes = [s for s in by_type.get("business_commitment", []) if s.value == "send_quotation" and not _after(s, delivered)]
-        open_requests = [s for s in by_type.get("quotation_request", []) if not _after(s, delivered)]
+        # Fulfilment must match the deliverable: only a document closes a quotation request or a
+        # document promise; a price typed or "sent" in chat closes only a price promise or enquiry.
+        documents = by_type.get("quotation_sent", []) + by_type.get("quotation_received", [])
+        prices_given = by_type.get("price_sent", []) + documents
+        declined = by_type.get("quotation_declined", [])
+
+        def quote_open(s: Signal) -> bool:
+            closers = prices_given if s.metadata.get("deliverable") == "price" else documents
+            return not _after(s, closers + declined)
+
+        open_quotes = [s for s in by_type.get("business_commitment", []) if s.value == "send_quotation" and quote_open(s)]
+        requests = [s for s in by_type.get("quotation_request", []) if quote_open(s)]
+        open_requests = [s for s in requests if not s.metadata.get("deferred")]
+        deferred = [s for s in requests if s.metadata.get("deferred")
+                    and not any(r.evidence.message_id > s.evidence.message_id for r in open_requests)]
         if open_quotes:
             propose("send_quotation", "จัดเตรียมและส่งใบเสนอราคาที่รับปากไว้",
                     sorted(open_quotes + open_requests, key=lambda s: s.evidence.message_id))
         else:
             propose("send_quotation", "ลูกค้าขอใบเสนอราคาเป็นเอกสาร: จัดเตรียมและส่งให้ลูกค้า (ราคาในแชตยังไม่ใช่ใบเสนอราคา)", open_requests)
-        priced = [s for s in amounts if s.actor == "business"] + delivered
+        priced = [s for s in amounts if s.actor == "business"] + prices_given
         propose("answer_price_enquiry", "ตอบราคาที่ลูกค้าสอบถาม โดยตรวจสอบราคาก่อนส่ง",
                 [s for s in by_type.get("price_enquiry", []) if not _after(s, priced)])
         offers = {s.evidence.message_id: s for s in by_type.get("information_offer", [])}
         info_sent = by_type.get("information_sent", [])
         for accepted_info in by_type.get("information_accepted", []):
-            if accepted_info.value != "quotation" and not _after(accepted_info, info_sent):
-                offer_signal = offers.get(accepted_info.metadata.get("offer_message_id"))
-                propose("send_offered_information", f"ส่งข้อมูลที่ลูกค้าตอบรับ ({accepted_info.value}); ไม่ใช่การยืนยันการซื้อ",
-                        [x for x in (offer_signal, accepted_info) if x is not None])
+            if accepted_info.value == "quotation" or _after(accepted_info, info_sent):
+                continue
+            offer_signal = offers.get(accepted_info.metadata.get("offer_message_id"))
+            sources = [x for x in (offer_signal, accepted_info) if x is not None]
+            if accepted_info.metadata.get("deferred"):
+                deferred.append(accepted_info)
+            else:
+                propose("send_offered_information", f"ส่งข้อมูลที่ลูกค้าตอบรับ ({accepted_info.value}); ไม่ใช่การยืนยันการซื้อ", sources)
+        # "เอาครับ แต่ยังไม่ต้องส่ง": keep the interest, honour the timing constraint.
+        propose("await_customer_go_ahead", "ลูกค้าสนใจแต่ขอให้ยังไม่ส่ง: รอให้ลูกค้าแจ้งก่อนจึงส่ง",
+                sorted(deferred, key=lambda s: s.evidence.message_id))
+        propose("confirm_payment_schedule", "ยืนยันกำหนดชำระเงินใหม่กับลูกค้า (ไม่เปลี่ยนนัดหมายงาน)",
+                by_type.get("payment_reschedule_request", []))
         payments_reported = by_type.get("payment_reported", [])
 
         def is_open(c: Signal) -> bool:
@@ -224,7 +285,7 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
                 [s for s in by_type.get("payment_signal", []) if s.value == "account_number_request"])
         propose("confirm_appointment", "ยืนยันวัน เวลา และสถานที่นัดกับลูกค้า", active_appointments)
         propose("request_missing_information", "ขอข้อมูลที่ยังไม่พบในบทสนทนา: " + ", ".join(s.value for s in missing), missing)
-        follow_sources = by_type.get("decision_pending", []) + by_type.get("negotiation", []) + by_type.get("quotation_sent", [])
+        follow_sources = by_type.get("decision_pending", []) + by_type.get("negotiation", []) + by_type.get("quotation_sent", []) + by_type.get("price_sent", [])
         if not accepted and state not in {"possible_acceptance", "changed_needs_review", "cancellation_needs_review"}:
             propose("follow_up_customer", "สอบถามการตัดสินใจของลูกค้า โดยเคารพคำขอคิดก่อน", follow_sources or by_type.get("customer_interest", []))
         open_deadlines = [s for s in by_type.get("deadline", []) if any(c.evidence.message_id == s.evidence.message_id for c in open_commitments)]
@@ -240,11 +301,14 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
         warnings.append("multiple_price_options; opportunity_amount_requires_review")
     if any(not _live(s) for s in signals):
         warnings.append("appointment_rescheduled; earlier_slot_superseded")
+    if price_relation_unclear:
+        warnings.append("later_price_relation_unclear; kept_earlier_explicit_total_for_review")
     if by_type.get("payment_reported"):
         warnings.append("payment_reported_not_verified")
     if state in {"possible_acceptance", "changed_needs_review", "cancellation_needs_review"}:
         warnings.append(f"deal_status_{state}")
     review = bool(warnings) or any(s.confidence < 0.80 for s in signals)
+    _validate_final(signals, actions, messages)
     return Analysis("0.1", provider.name, reference_date.isoformat() if reference_date else None, messages, signals, commercial,
                     bool(by_type.get("customer_interest")), pending, accepted, state, status_sources,
                     opportunity, missing, actions, review, warnings)

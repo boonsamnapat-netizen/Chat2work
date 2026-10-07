@@ -1,5 +1,101 @@
 # Chat2Work Core: self-audit
 
+## v0.1.2 semantic patch (2026-10-07)
+
+### Starting point
+
+- **Baseline:** v0.1.1 at `7dfab32` (282 tests, CI green), plus a later summary-only commit `3ba36d5`.
+- **Input:** an independent read-only review of `7dfab32` (`Chat2Work_v0.1.1_review.md`) and its expanded version, which came with a 28-check script and raw results.
+- **Reproduction:** I reproduced every finding. The reviewer's script gave **9/28 passed, 19 failed** on the baseline, identical to the review.
+- **Scope:** fix the 15 findings without adding product features. No UI, CRM, database, integration, execution, or paid LLM.
+
+### Corrections to v0.1.1 claims
+
+v0.1.1 made two claims that were not fully true:
+
+- **Typed prices and quotations.** The v0.1.1 README, SELF_AUDIT and Thai summary said a price typed in chat never counts as a delivered quotation. In fact the old `ส่งราคา…แล้ว` pattern still emitted `quotation_sent`, which closed a requested PDF quotation (finding 3).
+- **Rule-of-three bound.** v0.1.1 described the bound as "about 3.0%, at the target". The correct figure is 2.97%, and the IID sampling assumption behind it does not hold for this corpus.
+
+Both are corrected below and in the README.
+
+### Method
+
+1. **Tests first.** Wrote `tests/test_v012_semantics.py` before changing behavior. It is organized by semantic invariant: what is accepted, rejected, rescheduled, completed or priced, and whether it is asserted, negated, conditional, deferred or reported. It includes variations and purchase controls, not just the reviewer's strings. On the v0.1.1 baseline, **89 of its 129 tests failed**.
+2. **Fixes.** Each fix makes the event/object and the assertion status explicit before a state change, fulfilment, supersession or revenue value. Re-run the reviewer's script: **28/28**.
+3. **Adjacent probes.** Probed around each fix and found four more defects, one of them my own regression: broadening the identifier rule to `รุ่น…` swallowed `รุ่นนี้ 18,500 บาท` ("this model, 18,500 baht"). All four are fixed, with tests.
+4. **Holdout4.** Wrote 20 cases with labels frozen (SHA-256 `82c29a53…`) before the first run. Recorded that run, then fixed only the general weaknesses it showed. Holdout4 is now development coverage.
+5. **Diff and invariants.** Compared proposed actions on all 127 earlier benchmark conversations against v0.1.1: only two changed, both intended (see below). Re-checked the structural invariants.
+
+### Findings: before and after
+
+| # | Sev. | Reproduction (summary) | v0.1.1 | v0.1.2 |
+| --- | --- | --- | --- | --- |
+| 1 | P1 | `ส่งแคตตาล็อกให้ได้นะครับ` / `เดี๋ยวส่งรูปแอร์ให้ดูครับ` → `เอาครับ` | confirmed sale | `information_accepted`, no sale. Statement offers are classified by object; with a price or ordering wording they are `mixed` and need review. |
+| 2 | P1 | accepted sale → catalog/photo offer → `ไม่ซื้อครับ` / `ไม่จ้างครับ` | sale stayed confirmed | `declined`. Explicit transaction refusal is never overridden by the previous offer; a bare `ไม่เอา` to an offer still only declines the object. |
+| 3 | P2 | PDF request → `ส่งราคาให้แล้วครับ 18500 บาท` | `quotation_sent`, request closed | `price_sent`; `send_quotation` stays until the document is sent or received |
+| 4 | P2 | `ถ้าติดตั้งเสร็จแล้วจะโทรแจ้งครับ` | completion closed the install commitment | not asserted, so no completion; the commitment stays tracked and no phantom appointment is created |
+| 5 | P2 | `ขอเลื่อนโอนมัดจำไปวันศุกร์ครับ` | installation superseded, new time requested | `payment_reschedule_request` and `confirm_payment_schedule`; the appointment is untouched (also when both move in one message) |
+| 6 | P2 | `เอาครับ แต่ยังไม่ต้องส่งครับ` | send-now proposal | `deferred: true` and `await_customer_go_ahead`; a later explicit request reopens sending |
+| 7 | P1 | `เบอร์โทร +66890000000 ครับ` after a price question | 66,890,000,000 THB opportunity | no amount. Phone-like identifiers are masked first; a bare number is a price only in a price-shaped reply. |
+| 8 | P2 | gift `แถม…มูลค่า 500`, included `ค่าแรง 1500 บาทรวมอยู่ในราคาแล้ว`, expense `จ่ายค่าอะไหล่ 1500` | replaced or became the opportunity | `gift_value` / `included_component` / `expense` roles are never revenue. An earlier explicit total is kept against an unrevised later price, with a warning. |
+| 9 | P2 | `ช่างบอกราคา 18500 บาท` | role `budget`, opportunity null | `price`; `งบ` must be a real budget word |
+| 10 | P2 | `15 ต.ค. 70` with a reference date | raw `15 ต.ค.`, resolved 2026-10-15 | raw `15 ต.ค. 70`, unresolved (`ambiguous`) |
+| 11 | P2 | `ไม่ต้องส่งใบเสนอราคา`, `ใบเสนอราคามีอายุกี่วัน`, `ได้รับใบเสนอราคาแล้ว` | request plus send action; receipt read as possible acceptance | `quotation_declined` / `quotation_question` / receipt; no send action, no deal-state change |
+| 12 | P2 | `เพื่อนบอกว่าไม่เอาแล้ว แต่ผมยังเอาตามเดิม` | cancelled | sale kept. Without the reaffirmation it becomes `reported_cancellation`, needs review, never cancels. |
+| 13 | P2 | unknown speaker `นัดติดตั้งวันเสาร์ครับ` | derived missing-info at 0.84 | ≤ 0.65; derived nodes never exceed their source |
+| 14 | P2 | custom adapter signal `s2` | final IDs `s2, s2, s3` | unique IDs; final-output validation also checks action references |
+| 15 | P2 | address then `ที่อยู่เมื่อกี้ผิดครับ` | address treated as present | `installation_address` requested again until a new address follows |
+
+### Extra defects found during verification (all fixed, with tests)
+
+- **Adjacent probes:**
+  - `รุ่นนี้ 18,500 บาท` lost its price, and `id`/`line` could match inside English words. These were my regressions, now fixed.
+  - `ไม่ซื้อที่อื่นแน่นอน` (won't buy elsewhere) was read as rejecting the deal. This was inherited from v0.1.
+  - A statement offer plus ordering wording counted as pure information. It is now mixed and needs review.
+  - A message postponing both the appointment and the payment lost the appointment change.
+  - First-person `ผมบอกว่าไม่เอาแล้ว` must remain an own cancellation.
+- **Holdout4 first run:**
+  - `จะเข้าทำวันพุธ` was missed as a visit commitment, twice.
+  - `ไม่ต้องทำใบเสนอราคา ตกลงจ้างเลย` and `เอาครับ ไม่ซื้อร้านอื่นแล้ว` were missed as sales.
+  - `ไม่เอาแคตตาล็อก ตกลงซื้อเลย` (found while fixing those) was read as a rejection.
+
+### Results (local, Python 3.13.16)
+
+- **Tests:** `python -m pytest -q` → **427 passed**.
+- **Benchmark:** `python evaluate.py --check` → exit 0 on all five required splits. Earlier splits are byte-identical to v0.1.1.
+- **Reviewer's script:** **28/28**, up from 9/28.
+- **Action diff on the 127 earlier conversations:** two changed, both intended.
+  - `h3_contractor_quote_received`: the receipt report no longer creates a possible-acceptance review.
+  - `h3_solar_survey_completed`: the completion message no longer spawns a new appointment and its missing-info requests.
+- **Holdout4 first blind run:**
+
+  | Commitments F1 | Amounts | Amount roles | Dates | Pending | Sale | False sales |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | **0.667, below the 0.90 gate** (4 events) | 1.000 | 1.000 | 1.000 | 1.000 | 0.750 | 0/15 |
+
+  Every miss was on the cautious side.
+- **False confirmed sales:** 0 in 116 negative synthetic conversations. The exact one-sided bound would be about 2.6% under IID sampling, which does not apply here. **The < 3% target is not demonstrated.**
+- **Usefulness:** human usefulness remains **unmeasured**.
+
+### Remaining weaknesses
+
+- **Still patterns.** Semantic qualifiers (object, attribution, assertion, deferral) are Thai patterns, not a parser. Each review round found adjacent cases.
+- **Heuristic money roles.**
+  - Gift, component and expense roles come from nearby words.
+  - 9+ digit unseparated numbers are always treated as identifiers.
+  - An unclear later price is kept and flagged, not resolved.
+- **Offer detection.** It needs listed information objects and a send/receive verb, and looks back only three messages.
+- **Inherited from v0.1.1.** Single appointment slot, one deal per conversation, synthetic-only evaluation, uncalibrated confidence.
+
+### Recommended next step
+
+1. Stop adding rules for synthetic probes.
+2. Freeze a separately authored, consented and anonymized **real-world** set before changing anything.
+3. Have humans rate next-action usefulness on it.
+4. Only then decide whether to strengthen the semantic contract further, for example an LLM extractor behind the same `Extractor` protocol and final-output gates.
+
+---
+
 ## v0.1.1 safety patch (2026-10-07)
 
 ### Starting point

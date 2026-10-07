@@ -228,5 +228,78 @@
       "h3_print_accept_after_question",
       "h3_solar_survey_completed"
     ]
+  },
+  "holdout4.jsonl": {
+    "engine": "v0.1.2 after the expanded-review fixes, before any holdout4-informed change",
+    "amount_scoring": "values and roles",
+    "labels_frozen_sha256": "82c29a53e07d82615a5ac40e335bff46f09516854dd5b299104e4229340fc44f",
+    "cases": 20,
+    "metrics": {
+      "commitments": {
+        "tp": 2,
+        "fp": 0,
+        "fn": 2,
+        "precision": 1.0,
+        "recall": 0.5,
+        "f1": 0.6666666666666666
+      },
+      "amounts": {
+        "tp": 20,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "amount_roles": {
+        "tp": 20,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "dates": {
+        "tp": 8,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "commercial_intent": {
+        "tp": 19,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "decision_pending": {
+        "tp": 3,
+        "fp": 0,
+        "fn": 0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "confirmed_sale": {
+        "tp": 3,
+        "fp": 0,
+        "fn": 2,
+        "precision": 1.0,
+        "recall": 0.6,
+        "f1": 0.75
+      }
+    },
+    "false_confirmed_sales": 0,
+    "negative_sale_cases": 15,
+    "opportunity_amount_accuracy": 1.0,
+    "failed_case_ids": [
+      "h4_elec_conditional_done",
+      "h4_elec_payment_delay",
+      "h4_agency_no_quote_needed",
+      "h4_interior_loyal_customer"
+    ]
   }
 }

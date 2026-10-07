@@ -17,7 +17,7 @@ _MONTH = "|".join(re.escape(m) for m in sorted(MONTHS, key=len, reverse=True))
 _THAI_NUM = "หนึ่ง|สอง|สาม|สี่|ห้า"
 
 DATES = re.compile(
-    rf"\d{{1,2}}\s*(?:{_MONTH})(?:\s*\d{{4}})?"
+    rf"\d{{1,2}}\s*(?:{_MONTH})(?:\s*(?:\d{{4}}|\d{{2}})(?![\d:.]|\s*(?:โมง|นาฬิกา|ทุ่ม|น\.)))?"
     rf"|\d{{1,2}}/\d{{1,2}}(?:/\d{{2,4}})?"
     r"|วันนี้|พรุ่งนี้|มะรืนนี้|เย็นนี้|คืนนี้|เช้านี้|บ่ายนี้"
     r"|อาทิตย์หน้า|สัปดาห์หน้า|อาทิตย์นี้|สัปดาห์นี้|สิ้นเดือน(?:นี้|หน้า)?|ต้นเดือน(?:นี้|หน้า)?|เดือนหน้า"
@@ -53,7 +53,7 @@ def resolve(raw: str, reference: date) -> tuple[str | None, str]:
             return None, "ambiguous"
         return (reference + timedelta(days=delta)).isoformat(), "resolved"
     numeric = re.fullmatch(r"(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?", raw)
-    month_name = re.fullmatch(rf"(\d{{1,2}})\s*({_MONTH})(?:\s*(\d{{4}}))?", raw)
+    month_name = re.fullmatch(rf"(\d{{1,2}})\s*({_MONTH})(?:\s*(\d{{2,4}}))?", raw)
     if numeric or month_name:
         day = int((numeric or month_name)[1])
         month = int(numeric[2]) if numeric else MONTHS[month_name[2]]

@@ -7,7 +7,7 @@ from chat2work.evaluation.harness import evaluate
 DATA = Path(__file__).parent / "data"
 GATES = {"commitments": .90, "amounts": .95, "dates": .90}
 MAX_FALSE_SALE_RATE = .03
-REQUIRED_DATASETS = ("conversations.jsonl", "holdout.jsonl", "holdout2.jsonl", "holdout3.jsonl")
+REQUIRED_DATASETS = ("conversations.jsonl", "holdout.jsonl", "holdout2.jsonl", "holdout3.jsonl", "holdout4.jsonl")
 
 
 def failed_gates(report: dict) -> list[str]:

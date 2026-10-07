@@ -6,7 +6,7 @@ import pytest
 from chat2work.evaluation.harness import evaluate, load, _score
 
 DATA = Path(__file__).resolve().parents[1] / "data"
-DATASETS = [DATA / "conversations.jsonl", DATA / "holdout.jsonl", DATA / "holdout2.jsonl", DATA / "holdout3.jsonl"]
+DATASETS = [DATA / "conversations.jsonl", DATA / "holdout.jsonl", DATA / "holdout2.jsonl", DATA / "holdout3.jsonl", DATA / "holdout4.jsonl"]
 INDUSTRIES = {"air_conditioning", "cctv", "electrical", "repair", "contractor", "printing",
               "freelance_design", "agency", "solar", "interior", "noncommercial"}
 
@@ -17,7 +17,7 @@ def test_dataset_diversity_and_labelling():
     assert {r["industry"] for r in rows} == INDUSTRIES
     assert all(r["synthetic"] is True for r in rows)
     for r in rows:
-        assert all(len(a) == 2 and a[1] in {"price", "total", "deposit", "budget", "unit_price", "previous_price", "discount", "balance", "payment"} for a in r["expected"]["amounts"])
+        assert all(len(a) == 2 and a[1] in {"price", "total", "deposit", "budget", "unit_price", "previous_price", "discount", "balance", "payment", "gift_value", "included_component", "expense"} for a in r["expected"]["amounts"])
     tags = {t for r in rows for t in r.get("tags", [])}
     for scenario in ("acceptance", "cancellation", "noncommercial", "missed_payment", "quotation_promise", "multiple_amounts"):
         assert scenario in tags
