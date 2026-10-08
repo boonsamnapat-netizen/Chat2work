@@ -3,7 +3,8 @@ import re
 from ..models import Evidence, Message, Signal
 from .dates import DATES, extract_dates
 from .money import BUDGET, extract_amounts
-from .semantics import classify_clause, clause_at, clauses, event_target
+from .semantics import (UNCERTAIN, classify_clause, clause_at, clauses, event_target, hedged, reported_at,
+                        without_closed_conditions)
 
 COMMERCIAL = r"ราคา|ใบเสนอราคา|มัดจำ|โอน|ชำระ|เลขบัญชี|ซื้อ|สั่ง|เอา(?:ครับ|ค่ะ|ตัวนี้|อันนี้|รุ่นนี้)|ติดตั้ง|ซ่อม|" + BUDGET + r"|คิดค่า|ค่า(?:ซ่อม|แรง|บริการ|ออกแบบ|ติดตั้ง)|จ้าง|รับงาน|ขาย|สนใจ|รวมติด|แอร์|กล้อง|เดินสาย|โลโก้|โซลาร์|พิมพ์|ตกแต่ง|กี่บาท|แพ็กเกจ|โฆษณา|ช่าง|หน้างาน|สำรวจ"
 PENDING = (r"ขอ(?!ราคา|เลข|ใบ|โทษ)\S{1,15}ก่อน|รอ\S{0,15}(?:ก่อน|อนุมัติ)|แล้วจะ(?:ทัก|ติดต่อ|แจ้ง|บอก)|เดี๋ยวทัก|ขอคิด|คิดดู|คิดอีกที|ถามแฟน|(?:ถาม|ปรึกษา)\S{0,15}ก่อน|ขอดู\S{0,12}ก่อน|ขอดูอีกที|ดูอีกที|ยังไม่(?:ซื้อ|เอา|ตัดสินใจ|ตกลง|ยืนยัน|แน่ใจ)"
@@ -13,15 +14,16 @@ ELSEWHERE = r"ไม่(?:ไป)?(?:เอา|ซื้อ|จ้าง|ใช�
 RESCHEDULE = r"เลื่อน(?:นัด|วัน|คิว|เป็น)?|ยกเลิกนัด|ขอเปลี่ยนวัน|เปลี่ยนนัด"
 # Where the replacement slot starts inside a reschedule message ("ยกเลิกนัดเสาร์ 09:00 | เลื่อนเป็นศุกร์").
 REPLACEMENT_START = r"เลื่อน|ขอเปลี่ยนวัน|เปลี่ยนนัด|เปลี่ยนเป็น"
-COMPLETED = (r"(?:ติดตั้ง|ซ่อม|ทำงาน|ทำ|เดินสาย|ตรวจ|สำรวจ|ล้าง)\S{0,8}เสร็จ(?:แล้ว|เรียบร้อย|ละ)|เสร็จเรียบร้อยแล้ว"
-             r"|ช่าง(?:มา|เข้า)\S{0,10}แล้ว|เข้าหน้างานแล้ว|มาถึงแล้ว")
+COMPLETED = r"(?:ติดตั้ง|ซ่อม|ทำงาน|ทำ|เดินสาย|ตรวจ|สำรวจ|ล้าง)\S{0,8}เสร็จ(?:แล้ว|เรียบร้อย|ละ)|เสร็จเรียบร้อยแล้ว"
+# Arrival is attendance, not completion: "ช่างมาถึงแล้วครับ ยังไม่ได้เริ่มติดตั้ง" keeps the work open.
+ARRIVED = r"(?:ช่าง\S{0,4})?(?:มาถึง|ถึงหน้างาน|ถึงบ้าน)\S{0,10}(?:แล้ว|ละ)|ช่าง(?:มา|เข้า)\S{0,10}(?:แล้ว|ละ)|เข้าหน้างาน(?:แล้ว|ละ)"
 # Leading courtesy tokens that may precede an explicit acceptance ("โอเคครับ ตกลงตามนี้").
 _LEAD = r"^(?:(?:โอเค|ok|ได้|ครับ|ค่ะ|คะ|จ้า|ค่า|เลย)[\s,!.]*)*"
 ACCEPT = (_LEAD + r"(?:ตกลง(?:ครับ|ค่ะ|คะ)?[\s,]*(?:เอา|ซื้อ|สั่ง|จ้าง|ตามนี้|ทำเลย|ซ่อมเลย|ติดตั้งเลย|จัดเลย)|เอา(?:ครับ|ค่ะ|คับ|ค่า|จ้า|จ้ะ)(?:[\s.!]|$)|เอาเลย(?:ครับ|ค่ะ|พี่|นะ|[\s.!]|$)|(?:สั่ง|ซื้อ|จ้าง)เลย(?:ครับ|ค่ะ|พี่|นะ|[\s.!]|$)|เอา(?:ตัวนี้|อันนี้|รุ่นนี้|ตามนี้)(?:แหละ|เลย|ครับ|ค่ะ|พี่|นะ|[\s.!]|$)"
           r"|ยืนยัน(?:ตามราคานี้|ตามนี้|สั่งซื้อ|ซื้อ|จ้าง|เอา)|ตกลง(?:ซื้อ|จ้าง|ตามราคานี้|ตามนี้))")
 # Short replies that might accept a price but are not explicit: require human confirmation.
 POSSIBLE_ACCEPT = r"^(?:ตกลง|โอเค|ok|okay|จัดไป|ได้)(?:ครับ|ค่ะ|คะ|จ้า|เลย|[\s,!.])*"
-UNSAFE_ACCEPT = r"ถ้า|หาก|สมมติ|ตัวอย่าง|เขาบอก|เค้าบอก|เพื่อนบอก|ลูกค้าบอก|บอกว่า|พูดว่า|หมายถึง|ไม่|ยัง|ก่อน|ไหม|มั้ย|หรือเปล่า|หรือยัง|\?|[\"“”‘’]"
+UNSAFE_ACCEPT = r"ถ้า|หาก|สมมติ|ตัวอย่าง|หมายถึง|ไม่|ยัง|ก่อน|ไหม|มั้ย|หรือเปล่า|หรือยัง|\?|[\"“”‘’]"
 YES_NO_QUESTION = r"ไหม|มั้ย|ไม๊|หรือเปล่า|\?"
 # What a shop question offers. A price, quantity or spec in the question does not make it a
 # purchase question: "ราคา 18,500 บาท ให้ส่งใบเสนอราคาให้ไหม" offers a document.
@@ -68,7 +70,8 @@ QUESTION = r"ไหม|มั้ย|หรือยัง|หรือเปล�
 # A reply that is just a price ("3,200 ครับ", "ประมาณ 3,200 ค่ะ") — the only shape where a bare number is a price.
 BARE_PRICE_REPLY = r"^\s*(?:ประมาณ|อยู่ที่|ราว|ราวๆ|ก็)?\s*\d[\d,]*(?:\.\d{1,2})?\s*(?:บาท)?\s*(?:ครับ|ค่ะ|คะ|นะ|จ้า|ค่า)*[\s.!]*$"
 # "เวลาเดี๋ยวแจ้งอีกที" / "เดี๋ยวบอกเวลาอีกที": the time is pending, not the purchase decision.
-TIMING_PENDING = r"(?:เวลา|วัน|นัด|คิว)\S{0,6}(?:เดี๋ยว|ขอ)?\S{0,3}(?:แจ้ง|บอก)|(?:แจ้ง|บอก)(?:เวลา|วัน)"
+TIMING_PENDING = (r"(?:เวลา|วัน|นัด|คิว)\S{0,6}(?:เดี๋ยว|ขอ)?\S{0,3}(?:แจ้ง|บอก)|(?:แจ้ง|บอก)(?:เวลา|วัน)"
+                  r"|ยังไม่(?:ได้)?(?:ยืนยัน|แจ้ง|กำหนด)(?:วัน|เวลา|นัด|คิว)")
 # Hedges that contain negative/future markers but are not negation ("ไม่เกิน" = no later than).
 # Declining an information object ("ไม่เอาแคตตาล็อก") negates that object, not the purchase.
 DECLINED_INFO = r"(?:ไม่|ยังไม่)(?:ต้อง|เอา|ขอ)\S{0,8}(?:" + INFO_OBJECT + r")\S*"
@@ -77,6 +80,20 @@ _HEDGE_MASK = re.compile(r"ไม่เกิน|น่าจะ|ไม่ต้
 
 def has(pattern: str, text: str) -> bool:
     return re.search(pattern, text, re.I) is not None
+
+
+ACCEPT_WORD = r"เอา|ตกลง|ยืนยัน|ซื้อ|จ้าง|สั่ง|จัด|โอเค|ok"
+
+
+def acceptance_contradicted(text: str) -> bool:
+    """Wording that rules out reading the message as a firm acceptance: a condition still open,
+    negation, a question, someone else's words, a pending decision, a cancellation or a hedge on
+    the decision. Closed conditions ("ถ้า…ไม่เป็นไร") are ignored. The engine applies the same test
+    to acceptances from any extractor."""
+    scoped = without_closed_conditions(text)
+    guard = _HEDGE_MASK.sub("", scoped)
+    return (has(UNSAFE_ACCEPT, guard) or has(PENDING + "|" + CANCEL, scoped) or hedged(scoped, ACCEPT_WORD)
+            or (has(ATTRIBUTION, scoped) and reported_at(scoped, len(scoped))))
 
 
 def classify_offer(message: Message) -> str | None:
@@ -112,6 +129,20 @@ REFUSAL = (r"(?:ไม่ซื้อ|ไม่จ้าง|ไม่ตกล�
 # A customer releasing deferred information ("ส่งแคตตาล็อกมาได้แล้วครับ", "ขอแคตตาล็อกตอนนี้เลย").
 GO_AHEAD = r"(?:ส่ง|ขอ)\S{0,14}(?:มาได้|มาเลย|ได้แล้ว|ตอนนี้|มา(?=\S{0,3}(?:ครับ|ค่ะ|คะ|นะ|$)))"
 REMAINDER = r"ที่เหลือ|ส่วนที่เหลือ|ค้างอีก|ที่ค้าง"
+# A report that repeats an earlier transfer ("โอน 1000 บาทแล้วครับ ยอดเดียวกับเมื่อกี้") is not new money.
+SAME_TRANSFER = r"ยอดเดียวกับ|ยอดเดิม|รายการเดิม|อันเดิม|สลิปเดิม|แจ้งอีกรอบ|แจ้งซ้ำ|แจ้งอีกครั้ง|ส่งสลิปซ้ำ"
+# A report that says it is short, without saying by how much ("โอนแล้วครับ แต่ยังไม่ครบ").
+INCOMPLETE = r"ยังไม่ครบ|ไม่ครบ|บางส่วน|ยังขาด|ขาดอีก"
+# Times for a call or chat, not for the visit ("ผมว่างคุยโทรศัพท์วันนี้ 18:00").
+CALL_EVENT = r"โทร|คุย|ไลน์|แชต|แชท|คอล|ติดต่อกลับ|ประชุมออนไลน์"
+
+
+def payment_purpose(clause_text: str) -> str | None:
+    """What a reported transfer pays for: the deposit, a named fee ("ค่าอะไหล่"), or unspecified."""
+    if has(r"มัดจำ|เงินดาวน์", clause_text):
+        return "deposit"
+    fee = re.search(r"ค่า[^\s\d]{1,15}?(?=\s|\d|แล้ว|ละ|$)", clause_text)
+    return fee.group() if fee else None
 
 
 def event_status(text: str, pattern: str, *, completed: bool = False) -> tuple[str | None, re.Match | None]:
@@ -127,6 +158,39 @@ def event_status(text: str, pattern: str, *, completed: bool = False) -> tuple[s
     if not found:
         return None, None
     return next((f for f in found if f[0] == "asserted"), found[0])
+
+
+def _objects(scope: str) -> list[str]:
+    """The deliverables a clause names, quotation first; "ราคา" inside "ใบเสนอราคา" is not a price."""
+    found = [kind for kind, pattern in INFO_OBJECTS if has(pattern, scope)]
+    if "quotation" in found and "specification" in found and not has(r"สเปค|สเปก|spec|รายละเอียด|ข้อมูล", scope):
+        found.remove("specification")  # "ใบเสนอราคา PDF": PDF is the document's format
+    if has(r"ราคา", re.sub(QUOTE_DOCUMENT, "", scope)):
+        found.append("price")
+    return found
+
+
+def delivered_objects(text: str) -> tuple[list[str], str]:
+    """Objects of asserted, completed deliveries, and the message with those clauses removed.
+
+    The object is read from the delivery's own clause, or from a neighbouring clause that is only
+    an object ("ใบเสนอราคาที่ขอ | ผมส่งให้แล้วครับ"). Other clauses ("ส่วนใบเสนอราคาจะส่งพรุ่งนี้")
+    are left in ``rest`` for promise detection."""
+    found: list[str] = []
+    used: set[int] = set()
+    parts = clauses(text)
+    for m in re.finditer(DELIVERY_VERB, text, re.I):
+        i, parts = clause_at(text, m.start())
+        if not re.search(DONE, text[m.start():parts[i].end]) or classify_clause(text, m.start(), completed=True) != "asserted":
+            continue
+        kinds, scope = _objects(parts[i].text), {i}
+        for j in (i - 1, i + 1):
+            if not kinds and 0 <= j < len(parts) and not has(DELIVERY_VERB + "|" + PROMISE, parts[j].text):
+                kinds, scope = _objects(parts[j].text), {i, j} if _objects(parts[j].text) else scope
+        used |= scope
+        found += [k for k in (kinds or ["unspecified"]) if k not in found]
+    rest = "".join(" " * len(c.text) if n in used else c.text for n, c in enumerate(parts))
+    return found, rest if used else text
 
 
 def asserted_delivery(text: str) -> bool:
@@ -157,8 +221,9 @@ def is_affirmation(text: str) -> bool:
 
 
 def reported_by_someone_else(text: str, at: int) -> bool:
-    """True when the phrase at ``at`` is someone else's reported words."""
-    return has(ATTRIBUTION, text[:at])
+    """True when the phrase at ``at`` is someone else's reported words (the speaker has not taken
+    the floor back with "แต่ผม…" in between)."""
+    return reported_at(text, at)
 
 
 def unanswered_business_messages(messages: list[Message], i: int) -> list[Message]:
@@ -189,7 +254,7 @@ def open_offer(messages: list[Message], i: int) -> tuple[Message | None, str | N
 
 
 class RuleExtractor:
-    name = "thai_rules_v0.1.3"
+    name = "thai_rules_v0.1.4"
 
     def extract(self, messages: list[Message]) -> list[Signal]:
         signals: list[Signal] = []
@@ -254,7 +319,7 @@ class RuleExtractor:
                 self._acceptance(m, t, guard, question, offer, business_amount_seen, emit)
                 haggle = re.search(r"ลด(?:ได้|ราคา|หน่อย|ให้)|ต่อราคา|แพง|เหลือ.*ได้ไหม", t)
                 # "ถ้าแพงกว่านี้ผมไม่ซื้อ" is a hypothetical, not haggling; "ลดได้ไหม" still is.
-                if haggle and classify_clause(t, haggle.start()) != "conditional":
+                if haggle and classify_clause(t, haggle.start()) not in {"conditional", "reported"}:
                     emit(m, "negotiation", "price_negotiation", 0.90)
                 already = any(s.type == "quotation_request" and s.evidence.message_id == m.id for s in signals)
                 if has(QUOTE_DECLINED, t):
@@ -276,31 +341,42 @@ class RuleExtractor:
                     emit(m, "information_requested", kind, 0.90, reason="customer_asks_for_information_now")
             if m.actor == "business":
                 offer = classify_offer(m)
+                # A delivery closes only the object it names: "ส่งรูปให้แล้วครับ ส่วนใบเสนอราคาจะส่งพรุ่งนี้"
+                # delivered photos and still promises the quotation.
+                delivered, rest = delivered_objects(t)
+                info_sent = [k for k in delivered if k not in {"quotation", "price", "unspecified"}]
                 if offer in {"information", "mixed"}:
                     emit(m, "information_offer", info_kind(t), 0.90, offer_class=offer)
-                elif has(INFO_OBJECT, t) and not has(QUOTE_DOCUMENT, t) and asserted_delivery(t):
-                    emit(m, "information_sent", info_kind(t), 0.90)
+                elif info_sent:
+                    emit(m, "information_sent", info_sent[0], 0.90)
                 # A delivered quotation needs the document and an asserted, completed "sent" — not
                 # "ถ้าส่ง…แล้วจะ", "พรุ่งนี้จะส่ง… แล้ว…", "ส่งแล้วใช่ไหม" or "ยังไม่ได้ส่ง". A chat price is only a price.
-                document = has(QUOTE_DOCUMENT, t)
-                delivered = asserted_delivery(t)
-                if delivered and document:
+                document = has(QUOTE_DOCUMENT, rest)
+                if "quotation" in delivered:
                     emit(m, "quotation_sent", "quotation_document_sent", 0.93)
-                elif delivered and has(r"ราคา", t):
+                elif "price" in delivered:
                     emit(m, "price_sent", "price_given_in_chat", 0.90)
-                elif (document or has(r"ส่งราคา", t)) and has(PROMISE, t) and not has(r"ไม่ส่ง|ยังส่งไม่ได้|ส่งไม่ได้|อาจ|ถ้า|หาก|\?|ไหม|มั้ย", t):
+                if ((document or (has(r"ส่งราคา", rest) and not delivered)) and has(PROMISE, rest)
+                        and not has(r"ไม่ส่ง|ยังส่งไม่ได้|ส่งไม่ได้|อาจ|ถ้า|หาก|\?|ไหม|มั้ย", rest)):
                     emit(m, "business_commitment", "send_quotation", 0.96, deliverable="document" if document else "price")
                 if has(r"ยกเลิก(?!นัด)", t) and not has(r"ถ้า|หาก|ไม่ยกเลิก|ได้ไหม|ได้มั้ย|\?|ลูกค้า", t):
                     emit(m, "business_cancellation", "business_mentions_cancellation", 0.85)
             # Each "เลื่อน" moves one target: an appointment, a payment, or a deliverable (photos, a quotation).
             reschedule_at = replacement_end = None
             moves = []
+            uncertain_move = False
             if conversation_commercial and m.actor != "unknown":
                 for x in re.finditer(RESCHEDULE, t):
                     status = classify_clause(t, x.start())
                     # "เลื่อนเป็นวันศุกร์ได้ไหม" is a polite request, not a question about the past.
                     polite_request = status == "questioned" and has(r"ได้ไหม|ได้มั้ย|ได้ไม๊|ขอ", t)
-                    if status in {"conditional", "reported"} or (status == "questioned" and not polite_request):
+                    if status == "uncertain" and not uncertain_move:
+                        # "อาจจะเลื่อนนัดครับ": the slot stands; ask whether it will move.
+                        uncertain_move = True
+                        emit(m, "possible_reschedule", "reschedule_not_confirmed", 0.70, status=status,
+                             reason="reschedule_is_hedged; existing_slot_kept; confirm_with_customer")
+                    # "ไม่เลื่อนนัดครับ ใช้วันเดิม" keeps the slot; nothing moves.
+                    if status in {"conditional", "reported", "negated", "uncertain"} or (status == "questioned" and not polite_request):
                         continue
                     i_c, parts = clause_at(t, x.start())
                     target = event_target(t[:parts[i_c].end], x.start()) or "appointment"
@@ -318,6 +394,10 @@ class RuleExtractor:
                 emit(m, "reschedule_request", "reschedule_appointment" if starts else "cancel_appointment_slot", 0.90)
             done_status, done = event_status(t, COMPLETED, completed=True)
             mentions_completion = done is not None
+            arrived_status, arrived = event_status(t, ARRIVED, completed=True)
+            if conversation_commercial and arrived_status == "asserted" and done_status != "asserted":
+                emit(m, "technician_arrived", "technician_on_site", 0.85, verified=False,
+                     reason="arrival_is_attendance_not_completion; work_still_open")
             if conversation_commercial and done_status == "asserted":
                 emit(m, "appointment_completed", "work_or_visit_reported_complete", 0.88, verified=False)
             elif conversation_commercial and done_status in {"uncertain", "questioned"}:
@@ -356,8 +436,16 @@ class RuleExtractor:
                     # Only an asserted report counts, and it is still not bank-verified.
                     head = t[:remainder.start()] if remainder else t
                     paid = [a["amount"] for a in extract_amounts(head) if a["role"] in {"payment", "price", "deposit"}]
-                    emit(m, "payment_reported", "customer_reports_payment", 0.92, verified=False,
-                         **({"reported_amount": paid[0]} if paid else {}))
+                    i_r, parts_r = clause_at(t, report.start())
+                    purpose = payment_purpose(parts_r[i_r].text)
+                    details = {"reported_amount": paid[0]} if paid else {}
+                    if purpose:
+                        details["purpose"] = purpose
+                    if has(SAME_TRANSFER, t):
+                        details["repeat_of_previous"] = True
+                    if has(INCOMPLETE, t):
+                        details["partial"] = True
+                    emit(m, "payment_reported", "customer_reports_payment", 0.92, verified=False, **details)
                 if (m.actor == "customer" and remainder is not None and has(PAYMENT, t[remainder.start():])
                         and classify_clause(t, remainder.start()) in {"asserted", "future"}):
                     rest = [a["amount"] for a in extract_amounts(t[remainder.start():])]
@@ -387,6 +475,8 @@ class RuleExtractor:
                     kind = "deadline"
                 else:
                     kind = "schedule"
+                if has(CALL_EVENT, t) and not has(APPOINTMENT, t):
+                    slot = {**slot, "event": "call"}  # a time for talking, not for the visit
                 emit(m, kind, value, 0.91, **slot)
         return signals
 
@@ -394,12 +484,21 @@ class RuleExtractor:
     def _acceptance(m: Message, t: str, guard: str, question: Message | None, offer: str | None,
                     business_amount_seen: bool, emit) -> None:
         """Decide what a customer reply accepts: the purchase, offered information, or unclear."""
-        safe = not has(UNSAFE_ACCEPT, guard) and not has(PENDING + "|" + CANCEL, t)
+        safe = not acceptance_contradicted(t)
         named_purchase = has(NAMED_PURCHASE, t) and safe and not has(OPEN_QUESTION_WORDS, t)
         product_pick = has(r"เอา(?:ตัวนี้|อันนี้|รุ่นนี้|ตามนี้)", t) and not has(r"ถ้า|หาก|บอกว่า|ไหม|มั้ย|\?", guard)
-        if not (is_affirmation(t) or named_purchase or product_pick):
-            return
         offer_meta = {"offer_message_id": question.id} if question is not None else {}
+        # A hedged yes ("เอาครับ มั้งนะ", "น่าจะเอาครับ", "ตกลงซื้อเลยครับมั้ง") is never a confirmed sale.
+        core = re.sub(r"^[\s,]*(?:แต่)?\s*", "", re.sub(UNCERTAIN, "", t))
+        acceptance_words = is_affirmation(core) or has(NAMED_PURCHASE, t) or has(ACCEPT, core)
+        if (acceptance_words and hedged(t, ACCEPT_WORD) and offer not in {"information", "appointment", "other"}
+                and not has(r"(?:ไม่|ยังไม่)(?:" + ACCEPT_WORD + ")", t)):
+            emit(m, "possible_acceptance", "hedged_acceptance", 0.60, **offer_meta,
+                 reason="acceptance_is_hedged; confirm_explicitly")
+            return
+        scoped = without_closed_conditions(t).strip()  # "ถ้าวันเสาร์ไม่ได้ก็ไม่เป็นไรครับ | เอาครับ"
+        if not (is_affirmation(scoped) or named_purchase or product_pick):
+            return
         # A document the customer declines ("ไม่ต้องส่งใบเสนอราคา") is not something the reply asks for.
         reply_names_info = has(INFO_OBJECT, re.sub(DECLINED_INFO, "", t))
         if named_purchase and not reply_names_info:
@@ -424,8 +523,8 @@ class RuleExtractor:
         elif offer == "other":
             emit(m, "possible_acceptance", "reply_to_unrelated_question", 0.60, **offer_meta,
                  reason="yes_to_a_non_purchase_question; confirm_explicitly")
-        elif has(ACCEPT, t) and safe:
+        elif has(ACCEPT, scoped) and safe:
             emit(m, "customer_acceptance", "explicit_acceptance", 0.96, **offer_meta)
-        elif business_amount_seen and has(POSSIBLE_ACCEPT, t) and safe:
+        elif business_amount_seen and has(POSSIBLE_ACCEPT, scoped) and safe:
             emit(m, "possible_acceptance", "ambiguous_agreement", 0.70, **offer_meta,
                  reason="short_agreement_after_price; confirm_explicitly")

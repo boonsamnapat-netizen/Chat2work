@@ -8,6 +8,7 @@ DATA = Path(__file__).parent / "data"
 GATES = {"commitments": .90, "amounts": .95, "dates": .90}
 MAX_FALSE_SALE_RATE = .03
 ACTION_SCENARIOS = "action_scenarios.jsonl"
+SAFETY_SCENARIOS = "safety_scenarios.jsonl"
 MIN_ACTION_CASE_ACCURACY = .90
 REQUIRED_DATASETS = ("conversations.jsonl", "holdout.jsonl", "holdout2.jsonl", "holdout3.jsonl", "holdout4.jsonl")
 
@@ -17,18 +18,24 @@ def failed_gates(report: dict) -> list[str]:
         failed = [] if report["action_case_accuracy"] >= MIN_ACTION_CASE_ACCURACY else [f"action case accuracy < {MIN_ACTION_CASE_ACCURACY}"]
         if report["false_confirmed_sales"]:
             failed.append("false confirmed sale in action scenarios")
+        if report["safety_case_failures"]:
+            failed.append("safety scenario failed")
+        if report["genuine_sales_dropped_without_review"]:
+            failed.append("genuine sale dropped without review")
         return failed
     failed = [f"{name} F1 < {target}" for name, target in GATES.items() if (report["metrics"][name]["f1"] or 0) < target]
     fpr = report["confirmed_sale_false_positive_rate"]
     if fpr is None or fpr >= MAX_FALSE_SALE_RATE:
         failed.append(f"false confirmed-sale rate >= {MAX_FALSE_SALE_RATE}")
+    if report["genuine_sales_dropped_without_review"]:
+        failed.append("genuine sale dropped without review")
     return failed
 
 
 def select_datasets(parser: argparse.ArgumentParser, args: argparse.Namespace) -> list[Path]:
     """Every explicitly selected or required default dataset must exist; never skip one silently."""
     explicit = bool(args.dataset)
-    paths = args.dataset or [args.data_dir / name for name in REQUIRED_DATASETS + (ACTION_SCENARIOS,)]
+    paths = args.dataset or [args.data_dir / name for name in REQUIRED_DATASETS + (ACTION_SCENARIOS, SAFETY_SCENARIOS)]
     resolved = [p.resolve() for p in paths]
     duplicates = sorted({str(p) for p in resolved if resolved.count(p) > 1})
     if duplicates:
@@ -54,7 +61,7 @@ def main() -> None:
     reports = []
     for path in select_datasets(parser, args):
         try:
-            reports.append(evaluate_actions(path) if path.name == ACTION_SCENARIOS or "action_scenarios" in path.name else evaluate(path))
+            reports.append(evaluate_actions(path) if path.name.endswith("scenarios.jsonl") else evaluate(path))
         except (ValueError, json.JSONDecodeError, KeyError) as error:
             parser.error(f"cannot evaluate {path}: {error}")
     if not reports:

@@ -31,7 +31,7 @@ jobs:
           chat2work data/example_conversation.txt --reference-date 2026-10-07 > example-analysis-with-reference-date.json
           printf 'ลูกค้า: สนใจครับ\nร้าน: ราคา 18,500 บาท\nลูกค้า: ขอคิดดูก่อน\n' | python -m chat2work --compact
           python -c "import json; d = json.load(open('example-analysis-run.json', encoding='utf-8')); assert not d['confirmed_sale'] and d['potential_revenue']['amount'] == '43000'"
-          python -c "import json; [print(r['dataset'], {k: v['f1'] for k, v in r['metrics'].items()} if 'metrics' in r else {k: r[k] for k in ('action_case_accuracy', 'open_obligation_accuracy', 'required_action_recall')}, 'false sales', r['false_confirmed_sales'], '/', r['negative_sale_cases'], 'sale recall', r['sale_recall'], 'review', round(r['review_rate'], 3), 'abstain', round(r['sale_abstention_rate'], 3)) for r in json.load(open('benchmark-run.json', encoding='utf-8'))]"
+          python -c "import json; [print(r['dataset'], {k: v['f1'] for k, v in r['metrics'].items()} if 'metrics' in r else {k: r[k] for k in ('action_case_accuracy', 'open_obligation_accuracy', 'required_action_recall')}, 'false sales', r['false_confirmed_sales'], '/', r['negative_sale_cases'], 'sale recall', r['sale_recall'], 'review', round(r['review_rate'], 3), 'abstain', round(r['sale_abstention_rate'], 3), 'sales dropped without review', r['genuine_sales_dropped_without_review'], 'safety failures', r.get('safety_case_failures')) for r in json.load(open('benchmark-run.json', encoding='utf-8'))]"
       - uses: actions/upload-artifact@v4
         with:
           name: synthetic-benchmark-python-${{ matrix.python }}

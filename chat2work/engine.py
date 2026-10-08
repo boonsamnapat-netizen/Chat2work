@@ -8,6 +8,9 @@ from .models import Action, Analysis, Evidence, Extractor, Message, Opportunity,
 from .parsing import parse_conversation
 from .extractors import RuleExtractor
 from .extractors.dates import resolve
+from .extractors.rules import acceptance_contradicted
+from .redaction import ADDRESS_PLACEHOLDER
+from .validation import validate_references, validate_signal_values
 
 DATE_TYPES = {"deadline", "schedule", "temporal_mention"}
 # Customer signals that move the deal state, in conversation order.
@@ -25,7 +28,7 @@ ADDRESS_RETRACTED = r"ที่อยู่\S{0,12}(?:ผิด|ไม่ถู�
 # Wording that makes a later shop price a revision of an earlier explicit total.
 PRICE_REVISION = r"ราคาใหม่|ลดเหลือ|เหลือ|ปรับ|แก้ราคา|ลดให้|ราคาพิเศษ|เปลี่ยนเป็น|ต่ำสุด|ทั้งหมด|รวม"
 UNKNOWN_CEILING = 0.65
-LOCATION = r"ที่อยู่\s*[:：]\s*\S|ที่อยู่(?:คือ|อยู่)\s*\S|หน้างาน(?:อยู่|ที่)\s*\S|สถานที่(?:คือ|อยู่|:)\s*\S|ซอย\s*\S|ถนน\s*\S|บ้านเลขที่\s*\d|พิกัด\s*[:：]\s*\S|https?://(?:maps\.|maps\.app|goo\.gl/maps)"
+LOCATION = ADDRESS_PLACEHOLDER + r"|ที่อยู่\s*[:：]\s*\S|ที่อยู่(?:คือ|อยู่)\s*\S|หน้างาน(?:อยู่|ที่)\s*\S|สถานที่(?:คือ|อยู่|:)\s*\S|ซอย\s*\S|ถนน\s*\S|บ้านเลขที่\s*\d|พิกัด\s*[:：]\s*\S|https?://(?:maps\.|maps\.app|goo\.gl/maps)"
 
 
 def _validate(signals: list[Signal], messages: list[Message]) -> None:
@@ -44,11 +47,13 @@ def _validate(signals: list[Signal], messages: list[Message]) -> None:
             raise ValueError("Unknown speakers require human review")
         if s.type == "customer_acceptance" and (s.actor != "customer" or s.confidence < 0.90):
             raise ValueError("Acceptance requires an explicit customer and high confidence")
+    validate_signal_values(signals, messages)
 
 
 def _validate_final(signals: list[Signal], actions: list[Action], messages: list[Message]) -> None:
     """Invariants on the finished output, including nodes the core derived itself."""
     _validate(signals, messages)
+    validate_references(signals)
     ids = {s.id for s in signals}
     for a in actions:
         if not a.signal_ids or any(i not in ids for i in a.signal_ids) or not a.requires_human_approval:
@@ -130,9 +135,16 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
             best = per_message.get(s.evidence.message_id)
             if best is None or PRIORITY.get(s.type, 7) >= PRIORITY.get(best.type, 7):
                 per_message[s.evidence.message_id] = s
+    contradicted = []
     for _, s in sorted(per_message.items()):
         if s.type == "business_cancellation":
             state, status_sources = "cancellation_needs_review", [s.id]
+            continue
+        # Confidence and exact evidence do not prove meaning: an acceptance whose own message is
+        # hedged, conditional, negated, questioned, pending or reported goes to a person.
+        if s.type == "customer_acceptance" and acceptance_contradicted(s.evidence.text):
+            contradicted.append(s)
+            state, status_sources = "acceptance_needs_review", [s.id]
             continue
         # Routine later interest or a vague "ok" cannot undo a firmer state.
         if s.type in {"customer_interest", "possible_acceptance"} and state in {"accepted", "cancelled", "declined", "cancellation_needs_review"}:
@@ -145,7 +157,9 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
     pending = state in {"decision_pending", "negotiating"}
     inactive = state in {"cancelled", "declined"}
     amounts = by_type.get("monetary_amount", [])
-    candidates = [s for s in amounts if s.actor == "business" and s.value["role"] in {"price", "total"}]
+    # Only this shop's THB prices form the opportunity; another currency is never relabelled as THB.
+    candidates = [s for s in amounts if s.actor == "business" and s.value["role"] in {"price", "total"} and s.value["currency"] == "THB"]
+    foreign = [s for s in amounts if s.value["currency"] != "THB"]
     # Most recent business price message; prefer explicit total over component prices.
     latest_id = max((c.evidence.message_id for c in candidates), default=-1)
     latest = [s for s in candidates if s.evidence.message_id == latest_id]
@@ -203,7 +217,7 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
         if onsite and not located:
             need("installation_address", origin, "needed_for_onsite_schedule; not_found_in_supplied_messages")
         # Only times from the active arrangement count; a superseded slot's time is history.
-        appointment_dates = [s for s in signals if _live(s) and s.evidence.message_id >= active_from
+        appointment_dates = [s for s in signals if _live(s) and s.evidence.message_id >= active_from and s.metadata.get("event") != "call"
                              and (s.type == "schedule" or (s.type == "deadline" and any(a.evidence.message_id == s.evidence.message_id for a in active_appointments)))]
         if not any(s.value["kind"] == "time" for s in appointment_dates):
             need("appointment_time", origin, ("needed_for_rescheduled_slot" if rearranged else "needed_for_onsite_schedule")
@@ -253,7 +267,7 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
                     sorted(open_quotes + open_requests, key=lambda s: s.evidence.message_id))
         else:
             propose("send_quotation", "ลูกค้าขอใบเสนอราคาเป็นเอกสาร: จัดเตรียมและส่งให้ลูกค้า (ราคาในแชตยังไม่ใช่ใบเสนอราคา)", open_requests)
-        priced = [s for s in amounts if s.actor == "business"] + prices_given
+        priced = [s for s in amounts if s.actor == "business" and s.value["role"] != "competitor_price"] + prices_given
         propose("answer_price_enquiry", "ตอบราคาที่ลูกค้าสอบถาม โดยตรวจสอบราคาก่อนส่ง",
                 [s for s in by_type.get("price_enquiry", []) if not _after(s, priced)])
         offers = {s.evidence.message_id: s for s in by_type.get("information_offer", [])}
@@ -285,17 +299,28 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
         remainders = [s for s in by_type.get("customer_commitment", []) if s.metadata.get("purpose") == "remaining_balance"]
         partial_payment = []
 
+        def pays_for(r: Signal, c: Signal) -> bool:
+            """A report pays a commitment only if its purpose fits: a named fee ("ค่าอะไหล่") is not the deposit."""
+            purpose = r.metadata.get("purpose")
+            return purpose in {None, "deposit"} or c.value != "pay_deposit"
+
         def payment_open(c: Signal) -> bool:
-            later = [r for r in payments_reported if r.evidence.message_id > c.evidence.message_id]
+            later = [r for r in payments_reported if r.evidence.message_id > c.evidence.message_id and pays_for(r, c)]
             if not later:
                 return True
             if any(r.evidence.message_id > c.evidence.message_id for r in remainders):
                 return False  # superseded by the evidenced remaining-balance commitment
-            reported = [r.metadata.get("reported_amount") for r in later]
-            if c.metadata.get("amount") and all(reported):
-                if sum(Decimal(x) for x in reported) < Decimal(c.metadata["amount"]):
-                    partial_payment.append(c)
-                    return True
+            # A repeated report of the same transfer is not new money.
+            distinct = [r for r in later if not r.metadata.get("repeat_of_previous")]
+            if not distinct:
+                return True
+            reported = [r.metadata.get("reported_amount") for r in distinct]
+            known = c.metadata.get("amount") and all(reported)
+            covered = known and sum(Decimal(x) for x in reported) >= Decimal(c.metadata["amount"])
+            # "โอนแล้วครับ แต่ยังไม่ครบ": short by an unknown amount; never invent the remainder.
+            if (any(r.metadata.get("partial") for r in later) and not covered) or (known and not covered):
+                partial_payment.append(c)
+                return True
             return False
 
         def is_open(c: Signal) -> bool:
@@ -314,7 +339,9 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
         propose("check_payment", "ตรวจสอบยอดเงินจริงก่อนสรุปว่าได้รับชำระแล้ว", payment_commitments + by_type.get("payment_pending", []) + payments_reported)
         propose("provide_payment_details", "ตรวจสอบและส่งรายละเอียดการชำระเงินที่ถูกต้องให้ลูกค้า (ยังไม่ใช่การยืนยันการขาย)",
                 [s for s in by_type.get("payment_signal", []) if s.value == "account_number_request"])
-        propose("confirm_appointment", "ยืนยันวัน เวลา และสถานที่นัดกับลูกค้า", active_appointments)
+        possible_moves = by_type.get("possible_reschedule", [])
+        propose("confirm_appointment", "ยืนยันวัน เวลา และสถานที่นัดกับลูกค้า" + (" (ลูกค้าอาจเลื่อนนัด: ถามให้ชัดก่อนเปลี่ยนคิว)" if possible_moves else ""),
+                sorted(active_appointments + possible_moves, key=lambda s: s.evidence.message_id))
         propose("request_missing_information", "ขอข้อมูลที่ยังไม่พบในบทสนทนา: " + ", ".join(s.value for s in missing), missing)
         follow_sources = by_type.get("decision_pending", []) + by_type.get("negotiation", []) + by_type.get("quotation_sent", []) + by_type.get("price_sent", [])
         if not accepted and state not in {"possible_acceptance", "changed_needs_review", "cancellation_needs_review"}:
@@ -332,13 +359,19 @@ def analyze(conversation: str, *, extractor: Extractor | None = None, reference_
         warnings.append("multiple_price_options; opportunity_amount_requires_review")
     if any(not _live(s) for s in signals):
         warnings.append("appointment_rescheduled; earlier_slot_superseded")
+    if contradicted:
+        warnings.append("acceptance_contradicted_by_evidence; confirm_with_customer")
+    if foreign:
+        warnings.append("non_thb_amount; not_used_for_thb_opportunity")
+    if by_type.get("possible_reschedule"):
+        warnings.append("reschedule_not_confirmed; existing_slot_kept")
     if price_relation_unclear:
         warnings.append("later_price_relation_unclear; kept_earlier_explicit_total_for_review")
     if by_type.get("payment_reported"):
         warnings.append("payment_reported_not_verified")
     if not inactive and partial_payment:
         warnings.append("partial_payment_reported; remaining_amount_unconfirmed")
-    if state in {"possible_acceptance", "changed_needs_review", "cancellation_needs_review"}:
+    if state in {"possible_acceptance", "changed_needs_review", "cancellation_needs_review", "acceptance_needs_review"}:
         warnings.append(f"deal_status_{state}")
     review = bool(warnings) or any(s.confidence < 0.80 for s in signals)
     _validate_final(signals, actions, messages)

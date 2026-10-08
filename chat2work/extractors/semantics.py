@@ -18,11 +18,17 @@ _BOUNDARY = re.compile(r"\s+|(?=แต่|และ(?!ก็)|ที่เหล
 
 CONDITIONAL = r"ถ้า|หาก|สมมติ|ถ้าเกิด|พอ(?!ดี|แล้ว|ใจ)|เมื่อ(?!วาน|ไร|ไหร่|กี้|คืน)|หลังจาก|หลัง(?=\S{0,6}เสร็จ)|ในกรณี|กรณีที่"
 QUESTION = r"ไหม|มั้ย|ไม๊|หรือยัง|รึยัง|หรือเปล่า|รึเปล่า|หรือป่าว|ใช่ไหม|ใช่มั้ย|\?|เมื่อไร|เมื่อไหร่|ยังไง|อย่างไร|ได้ยังไง"
-UNCERTAIN = r"มั้ง|มั๊ง|ม้าง|น่าจะ|คง(?!ที่|เหลือ)|ไม่แน่ใจ|คิดว่า|อาจจะ|อาจ|ประมาณว่า|เหมือนจะ"
+UNCERTAIN = r"มั้ง|มั๊ง|ม้าง|น่าจะ|คง(?!ที่|เหลือ)|ไม่แน่ใจ|คิดว่า|(?<!เ)อาจ(?:จะ)?|ประมาณว่า|เหมือนจะ"  # not "เอาจ้า"
 FUTURE = r"(?<!น่า)จะ|เดี๋ยว|พรุ่งนี้|ค่อย|ทีหลัง|เย็นนี้|คืนนี้|บ่ายนี้|อาทิตย์หน้า|สัปดาห์หน้า"
 NEGATION = r"ไม่|ยังไม่|มิได้|ไม่ได้"
 REPORTED = (r"(?:เพื่อน|แฟน|แม่|พ่อ|หัวหน้า|ภรรยา|สามี|เขา|เค้า|ที่บ้าน|เจ้านาย|ลูกค้า)\S{0,6}บอก"
-            r"|(?<!ผม)(?<!ฉัน)(?<!เรา)(?<!หนู)(?:บอกว่า|พูดว่า)")
+            r"|(?<!ผม)(?<!ฉัน)(?<!เรา)(?<!หนู)(?<!ผมก็)(?:บอกว่า|พูดว่า)")  # "ผมบอกว่า…" is the speaker's own word
+# After reported words, a contrastive first-person clause gives the floor back to the speaker:
+# "เพื่อนบอกว่าดี | แต่ผมไม่ซื้อครับ" is the customer's own refusal.
+SPEAKER_RETURN = r"(?:แต่|ส่วน)\s*(?:ผม|หนู|เรา|ฉัน|ดิฉัน|กระผม|ตัวเอง)"
+# A condition that already has its own consequent ("ถ้าส่งไม่ทันไม่เป็นไร") is closed: it does not
+# govern the next clause ("ถ้าใบเสนอราคาส่งไม่ทันไม่เป็นไร | ผมยกเลิกงานนี้ครับ").
+CLOSED_CONDITION = r"ไม่เป็นไร|ไม่เป็นปัญหา|ไม่ว่ากัน|ก็ได้|ก็โอเค"
 
 
 @dataclass(frozen=True)
@@ -73,9 +79,9 @@ def classify_clause(text: str, position: int, *, completed: bool = False) -> str
     previous = parts[i - 1].text if i else ""
     if re.search(QUESTION, whole):
         return "questioned"
-    if re.search(CONDITIONAL, before) or re.match(r"^(?:แต่|และ|ก็)?(?:ถ้า|หาก)", previous):
+    if re.search(CONDITIONAL, before) or opens_condition(previous):
         return "conditional"
-    if re.search(REPORTED, text[:position]):
+    if reported_at(text, position):
         return "reported"
     if re.search(r"(?:" + NEGATION + r")\S{0,4}$", before):
         return "negated"
@@ -85,6 +91,52 @@ def classify_clause(text: str, position: int, *, completed: bool = False) -> str
     if re.search(FUTURE, future_scope):
         return "future"
     return "asserted"
+
+
+def opens_condition(clause_text: str) -> bool:
+    """A clause introducing a condition for what follows: it starts with ถ้า/หาก and is not closed."""
+    return bool(re.match(r"^(?:แต่|และ|ก็)?(?:ถ้า|หาก)", clause_text)) and not re.search(CLOSED_CONDITION, clause_text)
+
+
+def closed_conditions(text: str) -> list[Clause]:
+    """Conditional clauses that carry their own consequent; their markers belong to them alone."""
+    return [c for c in clauses(text) if re.match(r"^(?:แต่|และ|ก็)?(?:ถ้า|หาก)", c.text) and re.search(CLOSED_CONDITION, c.text)]
+
+
+def without_closed_conditions(text: str) -> str:
+    """The message with closed conditional clauses blanked out (same length, positions preserved)."""
+    for c in closed_conditions(text):
+        text = text[:c.start] + " " * (c.end - c.start) + text[c.end:]
+    return text
+
+
+def reported_at(text: str, position: int) -> bool:
+    """True when the words at ``position`` are someone else's reported speech: an attribution comes
+    before them and the speaker has not taken the floor back ("แต่ผม…") in between."""
+    last = None
+    for m in re.finditer(REPORTED, text[:position]):
+        last = m
+    return last is not None and not re.search(SPEAKER_RETURN, text[last.end():position])
+
+
+def hedged(text: str, clause_pattern: str) -> bool:
+    """A hedge (มั้ง, น่าจะ, คง, อาจ, คิดว่า…) that qualifies the event matched by ``clause_pattern``:
+    in the event's own clause, or in a neighbouring clause that holds nothing but the hedge, particles
+    and a repeated decision verb ("เอาครับ | มั้งนะ", "เอาครับ | น่าจะเอานะ", "ไม่แน่ใจ | แต่เอาครับ").
+    A hedge about something else ("เอาครับ | น่าจะสะดวกวันเสาร์") does not qualify it."""
+    parts = clauses(text)
+    events = [i for i, c in enumerate(parts) if re.search(clause_pattern, c.text)]
+    for i in events:
+        if re.search(UNCERTAIN, parts[i].text):
+            return True
+        for j in (i - 1, i + 1):
+            if 0 <= j < len(parts) and re.search(UNCERTAIN, parts[j].text) and re.fullmatch(_HEDGE_ONLY, parts[j].text):
+                return True
+    return False
+
+
+_HEDGE_ONLY = (r"(?:แต่|ก็|ผม|หนู|เรา|ฉัน|" + UNCERTAIN + r"|เอา|ซื้อ|ตกลง|จ้าง|สั่ง|ยืนยัน|ตามนี้|เลย|นะ|ครับ|ค่ะ|คะ|จ้า|ค่า|แหละ|ละ|"
+               r"น้า|คับ|[\s,.!])+")
 
 
 # --- targets ------------------------------------------------------------------------------

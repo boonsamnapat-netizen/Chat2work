@@ -1,6 +1,6 @@
 # Chat2Work pilot evaluation plan
 
-Status: plan for review. Nothing in this document has been run yet.
+Status: plan for review (metric definitions revised in v0.1.4). Nothing in this document has been run yet.
 
 ## 1. Why this is needed
 
@@ -11,6 +11,7 @@ Every Chat2Work number so far comes from **hand-written synthetic conversations*
 | v0.1 | four false sales |
 | v0.1.1 | two false sales, a phone number read as 66.89 billion baht |
 | v0.1.2 | plain information statements read as purchases |
+| v0.1.3 | hedged acceptance, a closed condition hiding a cancellation, a refusal after someone else's opinion; deliveries, payments and times matched to the wrong object |
 
 A green synthetic benchmark therefore says little about real chats. This plan describes how to measure real-world behaviour and usefulness honestly before anyone relies on the sale flag or the proposed actions.
 
@@ -39,6 +40,8 @@ Out of scope: no deployment, no automatic replies, no CRM or LINE integration, a
    | bank accounts | `[บัญชี]` |
    | addresses and map links | `[ที่อยู่]` |
    | ID/tax numbers, licence plates, photos | `[เลขประจำตัว]`, `[ทะเบียน]` (photos dropped) |
+
+   Use exactly these typed placeholders. The engine treats them as the information being present ([`chat2work/redaction.py`](chat2work/redaction.py)), so a redacted address still counts as an address and redaction does not change the analysis.
 
    Keep prices, quantities, dates and times, since they are what the engine is evaluated on. Shift absolute dates by a fixed per-business offset if they could identify someone.
 3. **Second-person check.** A second person reviews every anonymised conversation for remaining personal data before it enters the evaluation store. Any conversation that cannot be cleaned is excluded.
@@ -86,9 +89,32 @@ For each evaluation conversation, the business owner or the staff member who han
 | wrong | not true, or not my obligation |
 | harmful | doing it would upset or mislead the customer, or lose money |
 
-They also note anything important that Chat2Work did not propose, to measure missed actions.
+They also list anything important that Chat2Work did not propose (**missed useful actions**), and the staff log records how long each conversation took to review and correct.
 
-**Primary usefulness metric:** the share of proposed actions rated *useful* or *correct but not needed*. Target ≥ 80% for "next-action usefulness". Report the *harmful* rate separately; target 0.
+### 6.1 Definitions, fixed before any rating is collected
+
+Let *U*, *C*, *W* and *H* be the numbers of proposed actions rated useful, correct but not needed, wrong and harmful. Let *R* = *U* + *C* + *W* + *H* be all **rated** proposals, and *M* the number of missed useful actions the raters listed.
+
+| Metric | Formula | Target |
+| --- | --- | --- |
+| **Next-action usefulness** (primary) | *U* ÷ *R* | ≥ 80% |
+| Action correctness | (*U* + *C*) ÷ *R* | report; always ≥ usefulness |
+| Wrong-action rate | *W* ÷ *R* | report |
+| Harmful-action rate | *H* ÷ *R*, and the count *H* | 0 |
+| Missed useful actions | *M* ÷ (*U* + *M*), and *M* per conversation | report |
+| Review / correction time | median and 90th-percentile minutes per conversation, from the staff log | report |
+
+*Correct but not needed* is **not** useful. It counts towards correctness only, so usefulness can never be inflated by true but pointless proposals.
+
+### 6.2 Denominators and unrated proposals
+
+- The denominator is **rated** proposals only. Report the number of unrated proposals and the unrated share next to every rate.
+- A conversation counts as rated only if **every** proposal in it is rated. Partially rated conversations are excluded from all usefulness metrics and reported as a count. Excluding them is decided per conversation, never per proposal, so raters cannot drop hard proposals.
+- If more than 10% of proposals are unrated, report usefulness as a range as well: unrated counted as not useful (lower bound) and excluded (point estimate).
+- Conversations with no proposals contribute nothing to *R*, but any missed actions in them count in *M*.
+- Rates are reported overall and per business, with Wilson 95% intervals. Business-level results matter because chats are not independent.
+
+**No usefulness number may be claimed until these human ratings exist.** In particular, the ≥ 80% target is not met, or even measured, by any synthetic benchmark. Every synthetic report keeps `human_rated_action_usefulness: null`.
 
 ## 7. Metrics to report
 
@@ -98,17 +124,19 @@ Report every metric on the evaluation set, per release, overall and per business
 | --- | --- |
 | false confirmed-sale rate (engine said sale, human said no) | < 3%, with the upper confidence bound reported |
 | sale recall (engine confirmed ÷ human-confirmed sales) | report; low recall is acceptable only if those cases go to review |
+| genuine sales dropped without review (human sale; engine neither confirmed nor flagged review) | report the count; target 0 |
 | sale abstention rate (needs-a-human states) | report; also report sale recall **within** abstentions, i.e. how many abstentions were real sales |
-| open-obligation accuracy (engine's open set matches the human set) | report |
-| action precision (useful or correct ÷ all proposed) and missed-action rate | ≥ 80% precision |
-| harmful-action rate | 0 |
-| money: deal-value accuracy, and amount-role accuracy | report |
-| dates: active scheduling and deadline expressions | report |
-| review rate and time-to-review per conversation, from the pilot staff log | report |
+| open-obligation accuracy (engine's open set matches the human set by actor, amount, purpose, object and deadline) | report |
+| next-action usefulness, correctness, wrong, harmful, missed (section 6.1) | usefulness ≥ 80%; harmful 0 |
+| money: deal-value accuracy, and amount-role accuracy (incl. competitor prices) | report |
+| dates: active scheduling and deadline expressions, and whether each belongs to the right event | report |
+| review rate and review/correction time per conversation, from the pilot staff log | report |
 
-Also publish the confusion examples by failure category: information-vs-purchase, refusal, document events, deferral, payments, rescheduling, money roles, completion, and attribution. Real data will add categories.
+Also publish the confusion examples by failure category: information-vs-purchase, refusal, hedged acceptance, document events, deferral, payments (purpose, duplicates, partial), rescheduling, money roles, completion vs arrival, event times, attribution and redaction. Real data will add categories.
 
 ## 8. Procedure and stop criteria
+
+**Recommended first step: a supervised air-conditioning pilot.** Start with one industry, air-conditioning installation and repair, where the synthetic coverage is deepest (quotations, deposits, installation appointments, rescheduling, completion). Recruit two or three air-con businesses for development and two or three for evaluation. Every output is reviewed by the business before anything is done; Chat2Work proposes and staff decide. Widen to other industries only after this pilot meets the targets below. This patch does not contact any business or collect any data; the pilot starts only after the consent and anonymisation steps in sections 2–3 are in place.
 
 1. Freeze the evaluation set (section 4).
 2. Run the current release once on it. Record the results as the **baseline**, including all failures by category.
@@ -116,7 +144,8 @@ Also publish the confusion examples by failure category: information-vs-purchase
 4. **Stop and fix before any wider use if any of these occur:**
    - the false-sale upper bound is ≥ 3%;
    - any harmful action;
-   - action precision < 70%.
+   - any genuine sale dropped without review;
+   - next-action usefulness (*U* ÷ *R*) < 70%.
 5. A release may be called "pilot-validated" only if it passes the targets on a frozen evaluation set it was not tuned on, and the businesses agree the actions are useful. Even then it remains human-reviewed: actions are proposals and are never executed automatically.
 
 ## 9. What remains unproven until this is done

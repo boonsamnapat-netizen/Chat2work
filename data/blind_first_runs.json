@@ -319,5 +319,46 @@
     "failed_case_ids": [
       "a09_partial_payment"
     ]
+  },
+  "safety_scenarios.jsonl": {
+    "engine": "unmodified v0.1.3 baseline 563eb8a (scored with the v0.1.4 structured harness), before any v0.1.4 engine change",
+    "labels_frozen_sha256": "b14cbdc78b7c2afefd8f0bbc66dfb49e73e291adfa56a7e1f1acf6cf297499b4",
+    "not_blind": "written from the v0.1.4 audit findings, so this is a baseline measurement of known failures, not a blind test",
+    "label_correction_before_freeze": "s21 open_obligations: first draft listed none, but the shop's own 'นัดติดตั้งวันเสาร์' is a stated booking; corrected before the frozen hash and before this run",
+    "cases": 28,
+    "action_case_accuracy": 0.32142857142857145,
+    "required_action_recall": 0.75,
+    "forbidden_action_rate": 0.23076923076923078,
+    "open_obligation_accuracy": 0.7142857142857143,
+    "sale_recall": 0.5,
+    "confirmed_sale_false_positive_rate": 0.16666666666666666,
+    "false_confirmed_sales": 4,
+    "negative_sale_cases": 24,
+    "genuine_sales_dropped_without_review": 2,
+    "safety_cases": 22,
+    "safety_case_failures": 19,
+    "review_rate": 0.6428571428571429,
+    "sale_abstention_rate": 0.03571428571428571,
+    "failed_case_ids": [
+      "s01_hedged_acceptance",
+      "s02_hedged_named_purchase",
+      "s03_closed_conditional_then_cancel",
+      "s04_friend_praise_then_refusal",
+      "s06_negated_reschedule",
+      "s07_uncertain_reschedule",
+      "s08_negated_payment_reschedule",
+      "s11_photo_sent_quote_tomorrow",
+      "s12_price_sent_quote_tomorrow",
+      "s14_other_purpose_payment",
+      "s15_duplicate_transfer_report",
+      "s17_incomplete_without_amount",
+      "s19_arrival_not_completion",
+      "s21_call_time_not_installation_time",
+      "s22_competitor_price",
+      "s23_competitor_then_own_price",
+      "s26_genuine_sale_reaffirmed",
+      "s27_genuine_sale_closed_conditional",
+      "s28_redacted_address"
+    ]
   }
 }

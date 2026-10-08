@@ -1,5 +1,102 @@
 # Chat2Work Core: self-audit
 
+## v0.1.4 correctness and safety patch (2026-10-08)
+
+### Starting point
+
+- **Baseline:** v0.1.3 at `563eb8a7e674fd974fb762f779b7ddcb4ecf4032` (538 tests, CI green). HEAD equalled the remote, the working tree was clean, and there was no newer work, no other branch and no repository instructions.
+- **Input:** 13 finding groups (P1-01 to P2-10) from an independent audit of that commit.
+- **Scripts:** no new audit or reviewer script was supplied with this brief. Only the earlier 28-check script from the v0.1.1 review exists, and it was run. Every case in the brief was reproduced with a new script written for this patch.
+- **The synthetic URL** `https://maps.app.goo.gl/synthetic-audit` was never opened. It appears only as test text that a regular expression reads.
+
+### Method
+
+1. **Reproduce.** Ran every case from the brief on `563eb8a`. All of P1-01 to P2-08 reproduced as described, plus a `KeyError: 'role'` for an empty adapter value (see the table).
+2. **Tests first.** Wrote `tests/test_v014_correctness.py` before changing behavior. It has regression families with neighbouring variants and positive controls for each group. On `563eb8a`, **94 of its 140 tests failed**. Seven more tests were added later: two variants found while probing, and five for the new harness.
+3. **Safety scenarios first.** Wrote `data/safety_scenarios.jsonl` (28 cases) with structured obligations and harm tags. Froze its labels (SHA-256 `b14cbdc7…`, in `data/blind_first_runs.json`), then ran it on the unmodified engine: **9/28 passed**, with **4 false sales / 24** and 2 genuine sales dropped without review.
+   - One label correction was made before the freeze and before that run. The first draft of s21 listed no open obligation, but the shop's `นัดติดตั้งวันเสาร์` is a stated booking.
+   - No label in any earlier dataset was changed, and no case was removed.
+4. **Shared causes, not strings.** Fixed each group at its shared cause in the semantic layer, the rules or the engine. No exact-string exception was added, and sale detection was not disabled. See "Shared causes" below.
+5. **Verification.**
+   - Diffed proposed actions and deal states on all 171 earlier label and action cases against `563eb8a`: **0 changed**.
+   - Label metrics are byte-identical on the five label splits; review and abstention rates are unchanged.
+   - Re-checked invariants on all 199 conversations (421 actions): IDs, exact evidence, actors, references, confidence, and human approval on every action.
+
+### The 13 groups: before and after
+
+| ID | Reproduction (summary) | v0.1.3 (`563eb8a`) | v0.1.4 |
+| --- | --- | --- | --- |
+| P1-01 | after `ราคา 18500 บาทครับ`: `เอาครับ มั้งนะ`, `เอาครับ น่าจะเอานะ`, `ตกลงซื้อเลยครับมั้ง` | **confirmed sale** (0.96) in all three | `possible_acceptance` (`hedged_acceptance`, 0.60), review, `confirm_deal_status` with the reply as evidence. Control `ยืนยันตามราคานี้ครับ` still confirms. |
+| P1-02 | after an acceptance: `ถ้าใบเสนอราคาส่งไม่ทันไม่เป็นไร ผมยกเลิกงานนี้ครับ` | sale stayed confirmed | `cancelled`; the acceptance and the cancellation are both kept as evidence; `confirm_cancellation`. Control `ถ้าลดได้ เอาครับ` is still not acceptance. |
+| P1-03 | after an acceptance: `เพื่อนบอกว่าดี แต่ผมไม่ซื้อครับ` | sale stayed confirmed | `declined`. `เพื่อนบอกว่าไม่เอาแล้ว` alone is still `changed_needs_review`, not a cancellation; `…แต่ผมยังเอาตามเดิม` keeps the sale. |
+| P2-01 | booked Saturday 09:00, then `ไม่เลื่อนนัดครับ ใช้วันเดิม` / `อาจจะเลื่อนนัดครับ ยังไม่ได้ยืนยันวันใหม่` / `ไม่เลื่อนวันที่โอนมัดจำครับ ใช้วันเดิม` | slot superseded and `appointment_time` requested (first two); `confirm_payment_schedule` (third) | slot and its time kept; the shop's booking still tracked; no payment-schedule change. The hedged one adds `possible_reschedule` and a clarification note on `confirm_appointment`. Genuine reschedules still supersede; a payment reschedule still leaves the installation. |
+| P2-02 | PDF request, then `ส่งรูปให้แล้วครับ ส่วน/แต่ใบเสนอราคาจะส่งพรุ่งนี้`, `ส่งราคาให้แล้วครับ ใบเสนอราคาจะส่งพรุ่งนี้` | quotation closed; no `send_quotation` | quotation stays open: `send_quotation` plus the tracked promise (deadline `พรุ่งนี้`). Photos are `information_sent`; the price is `price_sent`. An actual document delivery still closes it. |
+| P2-03 A | deposit promise 5000, then `โอนค่าอะไหล่ 5000 บาทแล้วครับ มัดจำยังค้างอยู่` | deposit closed | deposit open; the report carries `purpose: "ค่าอะไหล่"` |
+| P2-03 B | promise 2000, `โอนแล้ว 1000 บาทครับ`, then `โอน 1000 บาทแล้วครับ ยอดเดียวกับเมื่อกี้` | counted twice, deposit closed | the repeat is `repeat_of_previous`; 1000 of 2000 is paid, so the deposit stays open with `partial_payment_reported` |
+| P2-03 C | `โอนแล้วครับ แต่ยังไม่ครบ` | deposit closed | stays open, `partial: true`, warning; no remaining amount invented |
+| P2-04 | `ช่างมาถึงแล้วครับ ยังไม่ได้เริ่มติดตั้ง` | installation commitment closed | `technician_arrived`; the installation stays tracked. Real completion still closes it; negated, conditional and hedged completion don't. |
+| P2-05 | `นัดติดตั้งวันเสาร์`, then `ผมว่างคุยโทรศัพท์วันนี้ 18:00 ครับ` | 18:00 filled the installation time | the time carries `event: "call"`; `appointment_time` is still requested |
+| P2-06 | `ร้านอื่นราคา 18500 บาทครับ ร้านผมยังไม่ได้คิดราคา` | opportunity 18,500 | role `competitor_price`, opportunity `null`, the price enquiry stays open. A later `ร้านเราราคา 17900 บาท` gives 17,900. |
+| P2-07 | fake adapters: amount `-1000` USD; `NaN` / `Infinity`; `{}`; acceptance 0.99 on `ขอคิดดูก่อนครับ` | ignored silently; ignored silently; **`KeyError: 'role'`**; **confirmed sale** | `ValueError` naming the type and problem for every malformed value. USD is never relabelled THB or used for the THB opportunity. The contradicted acceptance gives `acceptance_needs_review` with evidence-backed `confirm_deal_status`. Valid adapters work unchanged. The README no longer implies that evidence and confidence prove semantics. |
+| P2-08 | `นัดติดตั้งวันเสาร์ 09:00`, then the map URL vs `[ที่อยู่]` | URL: address present; placeholder: `installation_address` missing | both: address present (typed placeholders, `chat2work/redaction.py`); redaction-invariance tests for address, phone, name and bank-account placeholders |
+| P2-09 | pilot plan defined usefulness as (useful + correct) ÷ proposed | metrics conflated | usefulness = useful ÷ rated; correctness = (useful + correct-but-not-needed) ÷ rated; wrong and harmful separate; missed useful actions; review/correction time; denominators and unrated handling fixed in advance; no usefulness claim without human ratings; supervised air-conditioning pilot recommended first |
+| P2-10 | obligations scored as value strings only; no harm-specific gates | — | structured obligations (actor, amount, purpose, target, deadline); optional opportunity, money-role, missing-information and review labels; harm-tagged safety cases must all pass; new gate: genuine sales dropped without review = 0, on every set |
+
+### Shared causes and fixes
+
+- **Clause scope** (`semantics.py`).
+  - A condition with its own consequent (`…ไม่เป็นไร`, `…ก็ได้`) no longer governs the next clause (P1-02). The same scoping lets a genuine acceptance after such a clause count.
+  - Reported speech ends at a contrastive first-person clause (`แต่ผม…`), for clause status, cancellation attribution and negotiation (P1-03).
+- **Assertion status.**
+  - `hedged()` ties a hedge to a decision when it is in the decision's clause or in a neighbouring hedge-only clause (P1-01).
+  - Negated and uncertain reschedules move nothing (P2-01).
+  - `อาจ` no longer matches inside `เอาจ้า`.
+- **Event–object binding.**
+  - A completed delivery closes only the objects in its own clause (P2-02).
+  - Arrival is separated from completion (P2-04).
+  - Call or chat times are tied to the call (P2-05).
+  - Competitor amounts get their own role (P2-06).
+- **Payment matching** (P2-03): purpose from `มัดจำ` or a `ค่า…` word in the report clause, explicit repeat wording, and incomplete reports without an amount.
+- **Boundary validation** (P2-07): `chat2work/validation.py` runs inside `_validate`; references are checked again on the final graph. The engine's acceptance cross-check uses the same `acceptance_contradicted()` as the rules.
+
+### Schema and behavior changes
+
+- New signal types: `technician_arrived`, `possible_reschedule`.
+- New values and metadata: `possible_acceptance` value `hedged_acceptance`; `payment_reported` metadata `purpose`, `repeat_of_previous`, `partial`; date metadata `event: "call"`.
+- New money role: `competitor_price`.
+- New warnings: `acceptance_contradicted_by_evidence; confirm_with_customer`, `non_thb_amount; not_used_for_thb_opportunity`, `reschedule_not_confirmed; existing_slot_kept`.
+- The opportunity uses only THB `price`/`total` amounts from the shop.
+- Adapter values that were previously accepted, or that crashed, now raise `ValueError` before derivation.
+- `evaluate.py` evaluates `safety_scenarios.jsonl` by default (7 reports instead of 6). Every report gains `genuine_sales_dropped_without_review`, and scenario reports gain `safety_cases` and `safety_case_failures`. `tests/test_v011_safety.py` was updated for the seventh report.
+- Version 0.1.4; provider `thai_rules_v0.1.4`.
+
+### Results (local, Python 3.13.16; CI steps also run verbatim in clean 3.11 and 3.13 environments)
+
+- **Tests:** `python -m pytest -q` → **685 passed** (538 in v0.1.3).
+- **Benchmark:** `python evaluate.py --check` → exit 0 on all seven sets. Label scores are byte-identical to v0.1.3.
+- **Reviewer script:** the 28-check script from the v0.1.1 review gives **28/28**. No newer script was supplied, so none other was run.
+- **False sales:** 0 / 159 non-sale conversations across all seven sets: 135 in the six earlier sets and 24 in the safety scenarios. The safety scenarios were written from the audit and used to check the fixes, so they are not blind.
+- **Sale recall:** 40 / 40. Every labelled sale is confirmed, and **0 genuine sales are dropped without review**.
+- **Safety scenarios:**
+
+  | Run | Case accuracy | Open obligations | Sale recall | False sales | Silent sale drops | Safety failures | Review rate | Sale abstention |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | first run, v0.1.3 engine | 0.321 (9/28) | 0.714 | 2/4 | 4/24 | 2 | 19/22 | 0.643 | 0.036 |
+  | v0.1.4 | 1.000 | 1.000 | 4/4 | 0/24 | 0 | 0/22 | 0.714 | 0.107 |
+
+- **Earlier action scenarios:** unchanged at 1.000.
+- **Usefulness:** human usefulness is **not measured**, and nothing here supports a real-world or unattended-use claim.
+
+### Remaining weaknesses (found while probing, not fixed in this patch)
+
+- **Reported speech without `แต่`.** `เพื่อนบอกว่าร้านนี้ดี ผมเอาครับ` is not read as the customer's acceptance. The engine stays at `inquiry` with no review (conservative, but silent).
+- **Hedged refusal.** `คงไม่เอาครับ` changes nothing and is not flagged.
+- **Payment identity.** Transfer identity comes only from explicit repeat wording; payment purpose only from `มัดจำ` or `ค่า…`.
+- **Event times.** Call words decide them, so `โทรมาก่อนเข้า 10:00` re-asks for the visit time.
+- **Arrival vs completed survey.** A survey visit reported only as `ช่างเข้ามาดูหน้างานแล้ว` stays tracked.
+- **Competitor prices** are recognised only next to a few explicit words.
+- **Adapters.** The acceptance cross-check reads the evidence with the same Thai rules, so an adapter acceptance on wording the rules cannot read is still trusted.
+
 ## v0.1.3 event-classification patch (2026-10-07)
 
 ### Starting point

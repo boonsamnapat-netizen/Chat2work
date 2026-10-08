@@ -20,6 +20,10 @@ IDENTIFIER_BEFORE = re.compile(r"(?:เบอร์|โทร|ติดต่อ
 PHONE_LIKE = re.compile(r"\+\s*\d[\d\s\-]{6,}\d|(?<!\d)0\d{1,2}[\s\-]?\d{3}[\s\-]?\d{3,4}(?!\d)|(?<![\d,])\d{9,}(?![\d,])")
 
 
+COMPETITOR = r"ร้านอื่น|เจ้าอื่น|ที่อื่น|คู่แข่ง|ร้าน(?:ข้างๆ|ตรงข้าม)"
+OWN_SHOP = r"ร้านเรา|ร้านผม|ร้านหนู|ร้านดิฉัน|ของเรา|ของร้าน|ทางเรา|ทางร้าน"
+
+
 def extract_amounts(text: str, *, allow_bare: bool = False) -> list[dict]:
     """Return explicit THB amounts with a role.
 
@@ -58,6 +62,11 @@ def _role(prefix: str, after: str) -> str:
     def near(pattern: str) -> bool:
         return re.search(f"(?:{pattern})[^\\d]*$", prefix) is not None
 
+    # Another shop's price is context, never this shop's opportunity ("ร้านอื่นราคา 18500 บาท").
+    competitor = list(re.finditer(COMPETITOR, prefix))
+    own = list(re.finditer(OWN_SHOP, prefix))
+    if competitor and near(COMPETITOR) and not (own and own[-1].start() > competitor[-1].start()):
+        return "competitor_price"
     if near(r"มัดจำ|เงินดาวน์"):
         return "deposit"
     # Amounts that are part of the deal but are not its selling price.
